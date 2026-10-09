@@ -3,3 +3,5 @@ dist/
 .repoask-cache/
 *.log
 .DS_Store
+.vercel
+.env*

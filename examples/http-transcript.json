@@ -1,7 +1,7 @@
 {
-  "serverUrl": "http://localhost:3000/mcp",
+  "serverUrl": "https://repoask-mcp.vercel.app/mcp",
   "transport": "streamable-http",
-  "testedAt": "2026-10-09T21:23:58.591Z",
+  "testedAt": "2026-10-09T21:48:06.648Z",
   "steps": [
     {
       "step": "list_tools",
@@ -234,7 +234,7 @@
           }
         ]
       },
-      "timestamp": "2026-10-09T21:23:58.272Z"
+      "timestamp": "2026-10-09T21:48:06.093Z"
     },
     {
       "step": "index_repo",
@@ -262,10 +262,10 @@
           "fileCount": 2,
           "chunkCount": 8,
           "truncated": false,
-          "indexedAt": "2026-10-09T21:23:58.576Z"
+          "indexedAt": "2026-10-09T21:48:06.404Z"
         }
       },
-      "timestamp": "2026-10-09T21:23:58.580Z"
+      "timestamp": "2026-10-09T21:48:06.436Z"
     },
     {
       "step": "ask_repo",
@@ -329,7 +329,7 @@
           ]
         }
       },
-      "timestamp": "2026-10-09T21:23:58.585Z"
+      "timestamp": "2026-10-09T21:48:06.540Z"
     },
     {
       "step": "list_indexed_repos",
@@ -353,7 +353,7 @@
           ]
         }
       },
-      "timestamp": "2026-10-09T21:23:58.590Z"
+      "timestamp": "2026-10-09T21:48:06.628Z"
     }
   ]
 }
