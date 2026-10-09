@@ -1,0 +1,359 @@
+{
+  "serverUrl": "http://localhost:3000/mcp",
+  "transport": "streamable-http",
+  "testedAt": "2026-10-09T21:23:58.591Z",
+  "steps": [
+    {
+      "step": "list_tools",
+      "request": {
+        "method": "tools/list"
+      },
+      "response": {
+        "tools": [
+          {
+            "name": "index_repo",
+            "title": "Index a public GitHub repository",
+            "description": "Fetches a public GitHub repository's text files (source, docs, config — skips binaries, lockfiles, node_modules/dist/build/vendor), splits them into overlapping line-range chunks, and builds a local TF-IDF embedding index entirely in-process (no external embedding API, no paid key required). Must be called once before ask_repo for a given owner/repo. Re-calling re-indexes from the current default branch (or a specific ref if given). Large repos are capped at 80 files / 80KB per file to keep indexing fast and free.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "GitHub organization or user, e.g. 'octocat'"
+                },
+                "repo": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Repository name, e.g. 'Hello-World'"
+                },
+                "ref": {
+                  "description": "Optional branch, tag, or commit SHA. Defaults to the repo's default branch.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "owner",
+                "repo"
+              ],
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            },
+            "outputSchema": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string"
+                },
+                "repo": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "fileCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "chunkCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "truncated": {
+                  "type": "boolean",
+                  "description": "True if GitHub's tree API truncated the file listing (very large repo)."
+                },
+                "indexedAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp of indexing."
+                }
+              },
+              "required": [
+                "owner",
+                "repo",
+                "branch",
+                "fileCount",
+                "chunkCount",
+                "truncated",
+                "indexedAt"
+              ],
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "additionalProperties": false
+            },
+            "execution": {
+              "taskSupport": "forbidden"
+            }
+          },
+          {
+            "name": "ask_repo",
+            "title": "Ask a question about an indexed GitHub repository",
+            "description": "Answers a natural-language question about a GitHub repository that was previously indexed with index_repo (auto-indexes on first use if not yet indexed). Retrieves the most relevant chunks via local TF-IDF cosine similarity and returns them as citations with exact path + start/end line numbers. If ANTHROPIC_API_KEY or OPENAI_API_KEY is set in the server environment, also returns a synthesized prose answer with inline [n] citation markers referencing the citations array. If no LLM key is configured, 'answer' is a deterministic citation dump (no generation) and 'answerMode' is 'deterministic' — callers should treat the citations array as the ground truth either way.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "GitHub organization or user."
+                },
+                "repo": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Repository name."
+                },
+                "question": {
+                  "type": "string",
+                  "minLength": 3,
+                  "description": "Natural-language question about the repo's code or docs."
+                },
+                "topK": {
+                  "description": "Number of citations to return. Default 6.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                }
+              },
+              "required": [
+                "owner",
+                "repo",
+                "question"
+              ],
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            },
+            "outputSchema": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string"
+                },
+                "repo": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                },
+                "answer": {
+                  "type": "string"
+                },
+                "answerMode": {
+                  "type": "string",
+                  "enum": [
+                    "llm",
+                    "deterministic"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "citations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "rank": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "startLine": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "endLine": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "score": {
+                        "type": "number"
+                      },
+                      "excerpt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "rank",
+                      "path",
+                      "startLine",
+                      "endLine",
+                      "score",
+                      "excerpt"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "owner",
+                "repo",
+                "question",
+                "answer",
+                "answerMode",
+                "citations"
+              ],
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "additionalProperties": false
+            },
+            "execution": {
+              "taskSupport": "forbidden"
+            }
+          },
+          {
+            "name": "list_indexed_repos",
+            "title": "List repositories currently indexed in this server's memory",
+            "description": "Returns the owner/repo keys currently held in this server process's in-memory index cache. Useful for debugging or to check whether index_repo needs to be called before ask_repo.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {},
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            },
+            "outputSchema": {
+              "type": "object",
+              "properties": {
+                "repos": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "repos"
+              ],
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "additionalProperties": false
+            },
+            "execution": {
+              "taskSupport": "forbidden"
+            }
+          }
+        ]
+      },
+      "timestamp": "2026-10-09T21:23:58.272Z"
+    },
+    {
+      "step": "index_repo",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "index_repo",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "git-consortium"
+          }
+        }
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Indexed octocat/git-consortium@master: 2 files -> 8 chunks. Call ask_repo({ owner: \"octocat\", repo: \"git-consortium\", question: ... }) next."
+          }
+        ],
+        "structuredContent": {
+          "owner": "octocat",
+          "repo": "git-consortium",
+          "branch": "master",
+          "fileCount": 2,
+          "chunkCount": 8,
+          "truncated": false,
+          "indexedAt": "2026-10-09T21:23:58.576Z"
+        }
+      },
+      "timestamp": "2026-10-09T21:23:58.580Z"
+    },
+    {
+      "step": "ask_repo",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "ask_repo",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "git-consortium",
+            "question": "What is the git-consortium project and what does the README say about it?"
+          }
+        }
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "No LLM key configured (ANTHROPIC_API_KEY / OPENAI_API_KEY) — returning the top-matching source excerpts directly with their citations. Read the cited file+line ranges to answer the question yourself, or set an LLM key for prose synthesis.\n\n[1] product-backlog.md (lines 149-173):\n### What Is Git?\n\n* As a site visitor, I want there to be a section of the website that teaches me the basics of what Git is.\n* As a site editor, I can create the content of the What Is Git section.\n\n### Registry\n\n* As a site visitor, I can view lists on the site of all Certified Git Leaders, Practitioners, and Certified Product Owners.\n\n---\n\n[2] product-backlog.md (lines 119-154):\n* As a site visitor, I want to be able to read some of your articles.\n* As a site member, I want to have full access to all articles.\n* As a site visitor, I can do a full-text search of article body, title, and author name.\n* As a site visitor, I can subscribe to an RSS feed of articles. (Teasers only?)\n* As a site visitor, I can post comments about articles so that others can read them.\n\n### Home Page\n\n\n---\n\n[3] README.md (lines 1-7):\ngit-consortium\n==============\n\nThis repository is meant to provide an example for editing lists in Markdown. For some more information on Markdown, [check out our guide, \"Markdown Basics\"][Markdown]. Thanks! :sparkling_heart:\n\n[Markdown]: https://help.github.com/articles/markdown-basics \"Markdown Basics\"\n\n---\n\n[4] product-backlog.md (lines 168-198):\n* As a site admin, I can view all classes in a pending state.\n* As a site admin who has received proof of payment from a trainer, I can move people in his or her class from a pending state to the registry.\n* As a new Certified Git Leader or Certified Product Owner, once my name has been loaded to the registry I am sent an email welcoming me to the Git Consortium and containing instructions on how to register / activate my membership.\n* As a site editor, I can edit the content of the email automatically sent to new Certified Git Leaders and Product Owners.\n\n\n### Membership\n"
+          }
+        ],
+        "structuredContent": {
+          "owner": "octocat",
+          "repo": "git-consortium",
+          "question": "What is the git-consortium project and what does the README say about it?",
+          "answer": "No LLM key configured (ANTHROPIC_API_KEY / OPENAI_API_KEY) — returning the top-matching source excerpts directly with their citations. Read the cited file+line ranges to answer the question yourself, or set an LLM key for prose synthesis.\n\n[1] product-backlog.md (lines 149-173):\n### What Is Git?\n\n* As a site visitor, I want there to be a section of the website that teaches me the basics of what Git is.\n* As a site editor, I can create the content of the What Is Git section.\n\n### Registry\n\n* As a site visitor, I can view lists on the site of all Certified Git Leaders, Practitioners, and Certified Product Owners.\n\n---\n\n[2] product-backlog.md (lines 119-154):\n* As a site visitor, I want to be able to read some of your articles.\n* As a site member, I want to have full access to all articles.\n* As a site visitor, I can do a full-text search of article body, title, and author name.\n* As a site visitor, I can subscribe to an RSS feed of articles. (Teasers only?)\n* As a site visitor, I can post comments about articles so that others can read them.\n\n### Home Page\n\n\n---\n\n[3] README.md (lines 1-7):\ngit-consortium\n==============\n\nThis repository is meant to provide an example for editing lists in Markdown. For some more information on Markdown, [check out our guide, \"Markdown Basics\"][Markdown]. Thanks! :sparkling_heart:\n\n[Markdown]: https://help.github.com/articles/markdown-basics \"Markdown Basics\"\n\n---\n\n[4] product-backlog.md (lines 168-198):\n* As a site admin, I can view all classes in a pending state.\n* As a site admin who has received proof of payment from a trainer, I can move people in his or her class from a pending state to the registry.\n* As a new Certified Git Leader or Certified Product Owner, once my name has been loaded to the registry I am sent an email welcoming me to the Git Consortium and containing instructions on how to register / activate my membership.\n* As a site editor, I can edit the content of the email automatically sent to new Certified Git Leaders and Product Owners.\n\n\n### Membership\n",
+          "answerMode": "deterministic",
+          "citations": [
+            {
+              "rank": 1,
+              "path": "product-backlog.md",
+              "startLine": 149,
+              "endLine": 173,
+              "score": 0.194,
+              "excerpt": "### What Is Git?\n\n* As a site visitor, I want there to be a section of the website that teaches me the basics of what Git is.\n* As a site editor, I can create the content of the What Is Git section.\n\n### Registry\n\n* As a site visitor, I can view lists on the site of all Certified Git Leaders, Practitioners, and Certified Product Owners.\n  * The CSM list has over 5,000 names so a letter-based pagination approach is needed.\n* As a CSM, Practitioner, or Certified Product Owner, I can have my name listed in the registry without becoming a member of the site.\n  * For example, I take a certification class but never register or let my membership lapse.\n* As a trainer who has finished teaching a Certification class, I can load an Excel file (first name, last name, email) into the site.\n  * I am prompted for:\n    * the trainer names (I may not have trained alone)\n    * certification date\n    * type of certification (i.e., CSM or CPO)\n  * The names are loaded into a pending state and not yet added to the registry.\n    * Note: We could have this charge $50 per person right then.\n* As a site admin, I can view all classes in a pending state.\n* As a site admin who has received proof of payment from a trainer, I can move people in his or her class from a pending state to the registry.\n* As a new Certified Git Leader or Certified Product Owner, once my name has been loaded to the registry I am sent an email welcoming me to the Git Consortium and containing instructions on how to register / activate my membership.\n* As a site editor, I can edit the content of the email automatically sent to new Certified Git Leaders and Product Owners."
+            },
+            {
+              "rank": 2,
+              "path": "product-backlog.md",
+              "startLine": 119,
+              "endLine": 154,
+              "score": 0.17,
+              "excerpt": "* As a site visitor, I want to be able to read some of your articles.\n* As a site member, I want to have full access to all articles.\n* As a site visitor, I can do a full-text search of article body, title, and author name.\n* As a site visitor, I can subscribe to an RSS feed of articles. (Teasers only?)\n* As a site visitor, I can post comments about articles so that others can read them.\n\n### Home Page\n\n* As a site editor, I want to have a prominent area on the home page where I can put special announcements, not necessarily news or articles.\n* As a site editor, I'd like to have some flexibility as to where things appear to accommodate different types of content.\n* As a site member, the upcoming courses are what I want visitors to notice.\n* As a site visitor, I want to see new content when I come to the site.\n* As a site visitor, I want to have articles that interest me and are easy to get to.\n* As a site editor, I have ideas on how I want the home page to look and feel.\n* As a site visitor, I need to know as soon as I visit what on earth Git is, and why it needs an consortium.\n* As a site visitor, I want to know as I glance around the home page what on earth a CSM is and why I'd want to be one.\n* As a site visitor, I want to be able to get back to the home page quickly and easily.\n\n### Ratings\n\n* As someone who successfully completed a Certification Course (becoming a Certified Git Leader or Certified Product Owner), I am emailed a link to a survey about the course and instructor.\n* As a trainer, I want to be assured that no one can submit the same answers multiple time and skew my results.\n* As a trainer, I am notified about the results of surveys about my classes. (Questions: After each survey? After a set period of time? Does the trainer get an email or just know to go to the site?)\n* As a site admin, I can see the results for each trainer and averages for the class (for all trainers).\n* As a site visitor who is considering attending a certification course, I want to see a trainer's rating (either for that course or for all of his or her certification courses combined).\n* As a trainer, I want my rating to show up on my profile page.\n* As a site visitor, I want to see a list of the most popular items on the site.\n  * Note: Not everything has to be considered:\n     * we don't need to know the most popular profile\n     * it would be useful to a have a \"most popular\" box that listed the most popular articles, news items, or etc.\n\n### What Is Git?\n\n* As a site visitor, I want there to be a section of the website that teaches me the basics of what Git is.\n* As a site editor, I can create the content of the What Is Git section."
+            },
+            {
+              "rank": 3,
+              "path": "README.md",
+              "startLine": 1,
+              "endLine": 7,
+              "score": 0.081,
+              "excerpt": "git-consortium\n==============\n\nThis repository is meant to provide an example for editing lists in Markdown. For some more information on Markdown, [check out our guide, \"Markdown Basics\"][Markdown]. Thanks! :sparkling_heart:\n\n[Markdown]: https://help.github.com/articles/markdown-basics \"Markdown Basics\""
+            },
+            {
+              "rank": 4,
+              "path": "product-backlog.md",
+              "startLine": 168,
+              "endLine": 198,
+              "score": 0.074,
+              "excerpt": "* As a site admin, I can view all classes in a pending state.\n* As a site admin who has received proof of payment from a trainer, I can move people in his or her class from a pending state to the registry.\n* As a new Certified Git Leader or Certified Product Owner, once my name has been loaded to the registry I am sent an email welcoming me to the Git Consortium and containing instructions on how to register / activate my membership.\n* As a site editor, I can edit the content of the email automatically sent to new Certified Git Leaders and Product Owners.\n\n\n### Membership\n\n* As a company, I can join the Git Consortium by paying a corporate membership fee. This will include uploading items related to corporate membership\n  * e.g. company description\n  * e.g. a logo of size x by y.\n* As a corporate sponsor, my logo is displayed on a \"corporate sponsors\" page just like at http://www.agileconsortium.org/portal_url/corporatemembers.\n  * Note that the display order on that page is random.\n* As a corporate sponsor I want my logo to randomly appear on the home page.\n  * That is, it rotates among other corporate sponsors.\n* As a CSM or CPO who has been approved for Practitioner status (by a site admin reading my submission), I am charged a fee.\n* As someone about to become a trainer, I can pay an annual fee.\n* As a site administrator, I can set the annual fees for members, Practitioners and Trainers.\n* As someone whose membership (of any type) is about to expire, I am sent a reminder and a link through which I can renew.\n  * Note: Think about overlapping memberships and prorating.\n* As a member with short-term memory problems, I can have the system email me a new password or a password reminder, possibly my username (unless we use email for that), and so on.\n\n### For Trainers Only\n\n* As a trainer, I can read information of relevance only to trainers.\n* As a site editor, I can post information in a trainers-only section.\n\n---\n\nThis document is based on http://www.mountaingoatsoftware.com/agile/scrum/product-backlog/example/, used with the kind permission of Mike Cohn and Mountain Goat Software."
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-10-09T21:23:58.585Z"
+    },
+    {
+      "step": "list_indexed_repos",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "list_indexed_repos",
+          "arguments": {}
+        }
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "octocat/git-consortium"
+          }
+        ],
+        "structuredContent": {
+          "repos": [
+            "octocat/git-consortium"
+          ]
+        }
+      },
+      "timestamp": "2026-10-09T21:23:58.590Z"
+    }
+  ]
+}

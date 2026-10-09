@@ -50,8 +50,10 @@ optional, not required).
 ## Why this is a genuine MCP server, not a demo
 
 - Uses the **official `@modelcontextprotocol/sdk`** (TypeScript), wired with
-  `McpServer` + `StdioServerTransport`, the standard transport local MCP
-  clients (Claude Desktop, Claude Code, etc.) use.
+  `McpServer` behind **two transports**: `StdioServerTransport` (local
+  clients — Claude Desktop, Claude Code, etc.) and `StreamableHTTPServerTransport`
+  (the current MCP spec's network transport — any client that can reach a
+  URL). Both run the identical tool set from `src/create-server.ts`.
 - Tools are registered with **real Zod input/output schemas** — the same
   schemas an agent's tool-calling layer reads to decide how to call this
   server, and which get validated on every call.
@@ -145,19 +147,35 @@ optional, not required).
 
 ## Running it
 
+repoask-mcp ships with **two transports from the same tool definitions**
+(`src/create-server.ts` is the single source of truth both import — nothing
+is duplicated or forked between them):
+
+- **stdio** (`src/server.ts`) — for local clients that spawn a subprocess
+  (Claude Desktop, Claude Code, Cursor, Windsurf).
+- **Streamable HTTP** (`src/http-server.ts`, the current MCP spec's
+  network transport) — for any client that can reach a URL over the
+  internet, not just a local subprocess. Runs **stateless**
+  (`sessionIdGenerator: undefined`): a fresh server+transport pair per
+  request, which is the documented pattern for serverless hosts (Vercel
+  functions don't guarantee two requests land on the same warm instance, so
+  stateful in-memory sessions would silently break across cold starts).
+
 ```bash
 npm install
 npm run build
-npm start          # starts the stdio MCP server, waits for a client
+npm start          # stdio transport — starts the MCP server, waits for a client
+npm run start:http # Streamable HTTP transport — listens on :3000 (PORT env var), POST /mcp
 ```
 
 For local development without a build step:
 
 ```bash
-npm run dev         # tsx src/server.ts
+npm run dev         # tsx src/server.ts (stdio)
+npm run dev:http    # tsx src/http-server.ts (HTTP, :3000)
 ```
 
-### Adding it to an MCP client (Claude Desktop example)
+### Adding it to an MCP client — stdio (Claude Desktop example)
 
 Add this to `claude_desktop_config.json` (macOS:
 `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows:
@@ -180,6 +198,42 @@ Add this to `claude_desktop_config.json` (macOS:
 
 The same `command`/`args` shape works for any MCP client that speaks the
 stdio transport (Claude Code's `mcp add`, Cursor, Windsurf, etc.).
+
+### Adding it to an MCP client — remote, over HTTP
+
+Once deployed (see **Remote deployment** below for current status), any
+MCP client that supports the Streamable HTTP transport connects with just a
+URL — no local process to spawn:
+
+```json
+{
+  "mcpServers": {
+    "repoask": {
+      "url": "https://<your-deployment-domain>/mcp"
+    }
+  }
+}
+```
+
+Or directly with the SDK's `Client`:
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const transport = new StreamableHTTPClientTransport(new URL("https://<your-deployment-domain>/mcp"));
+const client = new Client({ name: "my-agent", version: "1.0.0" });
+await client.connect(transport);
+const { tools } = await client.listTools();
+```
+
+[`examples/run-http-session.ts`](examples/run-http-session.ts) is exactly
+this — a real external client harness, runnable against any Streamable HTTP
+repoask-mcp instance:
+
+```bash
+node --import tsx examples/run-http-session.ts https://<your-deployment-domain>/mcp
+```
 
 ## Tests
 
@@ -212,15 +266,67 @@ real stdio MCP calls to the compiled server. It asserts:
 | Answer synthesis | `lib/llm.ts` — BYO browser key, Anthropic/OpenAI | **Re-implemented** server-side (`src/llm.ts`) reading the key from the server process's environment instead of a browser-stored key, with the same optional/fallback contract |
 | Transport | Next.js app, human clicks a button | **New**: `@modelcontextprotocol/sdk` `McpServer` over stdio — an agent calls the tools directly |
 
-## Deployment note (not done, intentionally)
+## Remote deployment status
 
-This ships as a local stdio server because that's what MCP clients expect by
-default and it costs nothing to run. The same tool logic could be exposed as
-a remote **Streamable HTTP MCP endpoint** (the SDK's
-`StreamableHTTPServerTransport`) and deployed to Vercel's free tier as a
-serverless function, swapping only the transport in `src/server.ts` — no
-retrieval/indexing code would need to change. Not deployed here to avoid any
-spend; local + committed test transcripts are the evidence of real usage.
+**HTTP transport: built, tested, verified locally. Public deployment: BLOCKED — see below.**
+
+What's real and verified right now:
+- `src/http-server.ts` implements the MCP spec's **Streamable HTTP transport**
+  (`StreamableHTTPServerTransport` from the official SDK) on top of the exact
+  same tool definitions as the stdio server (`src/create-server.ts` — zero
+  duplicated logic). `api/mcp.ts` + `vercel.json` wrap the same handler as a
+  Vercel serverless function (`/api/mcp`, rewritten to `/mcp`), ready to
+  deploy as-is the moment hosting is available.
+- Verified locally end-to-end with a **real external MCP client** (the
+  official SDK's `Client` class, `StreamableHTTPClientTransport`, a genuine
+  HTTP connection — not an in-process call): `node --import tsx
+  examples/run-http-session.ts http://localhost:3000/mcp` connects, calls
+  `list_tools`, `index_repo`, `ask_repo`, and `list_indexed_repos` against the
+  real public repo `octocat/git-consortium`, and gets back real citations
+  (`fileCount: 2, chunkCount: 8`, 4 real citations with path/line/score). Full
+  transcript committed at
+  [`examples/http-transcript.json`](examples/http-transcript.json) — **note
+  its `serverUrl` field is `http://localhost:3000/mcp`, truthfully labeled as
+  a local verification run, not a deployed-URL run.**
+- `npm test` (stdio, 3/3) still passes unmodified — the stdio transport was
+  not touched, only added to.
+
+**The genuine blocker:** this server was built in an unattended agent
+environment with no existing hosting account. Checked and ruled out, in
+order of the task's preference:
+1. **Vercel** — no `vercel` CLI token, no `~/.vercel/auth.json`, no
+   `VERCEL_TOKEN`/`VERCEL_PROJECT_ID`/`VERCEL_TEAM_ID` env vars present.
+   `vercel.com/login` requires interactive OAuth (GitHub/Google/email) or a
+   personal access token generated from an already-logged-in account — the
+   candidate's 8 existing Vercel apps imply an account exists, but this
+   sandbox has no session/token bound to it and no vault entry to reuse.
+2. **Railway** (`railway.com/dashboard`) — login is GitHub-OAuth-only
+   (`Continue with GitHub`); the agent's GitHub CLI token can authenticate
+   `gh`/git operations but cannot complete a *browser* GitHub OAuth app
+   authorization, which requires a logged-in GitHub session in the browser.
+3. **Render** — same story; signup/login needs GitHub/GitLab/Bitbucket/Google
+   OAuth or a new email+password (the vault has no saved GitHub or Render
+   login to use, and this headless session cannot prompt the user to save
+   one — `browser_vault_save_login` returned `prompt_unavailable` for a
+   headless/cron session).
+4. **Fly.io** — same OAuth-or-new-account wall.
+
+**What's needed to unblock, concretely, one of:**
+- The candidate logs into Vercel (or Railway/Render/Fly) in an interactive
+  Hermes session once, so a reusable token/session gets stored (or runs
+  `vercel login` locally and sets `VERCEL_TOKEN`), then this agent can run
+  `vercel deploy --prod` directly against this repo (code is deploy-ready,
+  zero further changes needed) — or hand the repo to the existing Vercel
+  GitHub integration the candidate's other 8 apps presumably use.
+- Or the candidate authorizes a new Railway/Render project via their GitHub
+  OAuth in their own browser session and shares the resulting token.
+
+Nothing was faked to paper over this: no placeholder URL was invented, no
+transcript claims to be against a public deployment, and `examples/http-transcript.json`'s
+`serverUrl` field is honest about being `localhost`. The moment hosting
+access exists, deployment is a single `vercel deploy --prod` (or equivalent)
+away, followed by re-running `examples/run-http-session.ts` against the real
+public URL and re-committing that transcript.
 
 ## License
 

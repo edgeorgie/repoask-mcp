@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
+    "start:http": "node dist/http-server.js",
     "dev": "tsx src/server.ts",
+    "dev:http": "tsx src/http-server.ts",
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "repository": {
@@ -33,11 +35,14 @@
   "homepage": "https://github.com/edgeorgie/repoask-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "express": "^5.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.6.5",
+    "@vercel/node": "^23.0.1",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^5.7.3"
   }
 }
