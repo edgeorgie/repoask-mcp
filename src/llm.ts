@@ -6,8 +6,7 @@
  * the top-matching chunks (same "no key required" contract as repoask and triage-desk).
  */
 
-import { SYSTEM_PROMPT, buildPrompt } from "./rag.js";
-import type { Chunk } from "./chunk.js";
+import { SYSTEM_PROMPT, buildPrompt, type Chunk } from "@edgeorgie/retrieval-core";
 
 export interface SynthesisResult {
   answer: string;
