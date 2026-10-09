@@ -10,12 +10,8 @@ proven in [edgeorgie/repoask](https://github.com/edgeorgie/repoask) (a
 browser-based "ask this repo" tool using in-browser embeddings) as a real,
 agent-callable MCP server, following the current MCP spec.
 
-> This exists as direct evidence for PostHog's Product Engineer posting, which
-> explicitly asks: *"Have you built anything agents use? ...an API an agent
-> can drive, an MCP server, evals, docs written for a machine."* This repo is
-> that MCP server — see [`docs/example-session.md`](docs/example-session.md)
-> for a real, captured transcript of an MCP client calling it and getting
-> real, non-fabricated citations back.
+> See [`docs/example-session.md`](docs/example-session.md) for a captured
+> transcript of an MCP client calling it and the citations it got back.
 
 ## How this differs from repoask
 
@@ -82,7 +78,7 @@ fast, free, and within GitHub's unauthenticated rate limits (set
 `GITHUB_TOKEN` in the environment to raise the limit for heavy use — this is
 optional, not required).
 
-## Why this is a genuine MCP server, not a demo
+## Implementation notes
 
 - Uses the **official `@modelcontextprotocol/sdk`** (TypeScript), wired with
   `McpServer` behind **two transports**: `StdioServerTransport` (local
@@ -102,8 +98,8 @@ optional, not required).
   client harness that connects to the server and captures the **full raw
   request/response JSON** for a real session into
   [`examples/transcript.json`](examples/transcript.json) and a readable
-  [`docs/example-session.md`](docs/example-session.md) — proof an actual MCP
-  client invoked these tools and got real, verifiable answers with citations.
+  [`docs/example-session.md`](docs/example-session.md) — a record of an MCP
+  client invoking these tools and the answers with citations it got back.
   Nothing in those files is hand-written; regenerate it yourself with:
 
   ```bash
@@ -328,7 +324,7 @@ real stdio MCP calls to the compiled server. It asserts:
   results (`fileCount: 2, chunkCount: 8`, 4 real citations with
   path/line/score). Full transcript committed at
   [`examples/http-transcript.json`](examples/http-transcript.json) — its
-  `serverUrl` field is honestly `https://repoask-mcp.vercel.app/mcp`.
+  `serverUrl` field is `https://repoask-mcp.vercel.app/mcp`.
 - `npm test` (stdio, 3/3) still passes unmodified — the stdio transport was
   not touched, only added to.
 
@@ -377,9 +373,8 @@ real stdio MCP calls to the compiled server. It asserts:
    `process.env.REPOASK_CACHE_DIR`, see `src/store.ts` — no code change
    needed, config only).
 
-No placeholder URL, no fabricated transcript at any point in this process —
-the two earlier `500`s were real, reported honestly, and root-caused before
-claiming success.
+The two earlier `500`s are documented above as they happened, root-caused
+before moving on.
 
 ## License
 
