@@ -17,6 +17,10 @@ agent-callable MCP server, following the current MCP spec.
 > for a real, captured transcript of an MCP client calling it and getting
 > real, non-fabricated citations back.
 
+## How this differs from repoask
+
+[repoask](https://github.com/edgeorgie/repoask) is a browser-only, zero-backend tool: embeddings are computed client-side with a transformer model (MiniLM via Transformers.js) and nothing is ever sent to a server — built for a human asking one-off questions privately, with no install. repoask-mcp is a different engine built primarily for AI agents: a persistent, cloud-deployed MCP server exposing `index_repo`/`ask_repo`/`list_indexed_repos` as callable tools over stdio or Streamable HTTP, using server-side TF-IDF retrieval (lexical, no neural model, no GPU) instead of in-browser semantic embeddings. It also ships a thin human web UI as a convenience layer over that same engine, but the reason this repo exists — and the reason to pick it over repoask — is the agent-callable MCP surface, not the browser experience.
+
 ## Two usage modes, one engine
 
 **🧑 Human web UI:** open **https://repoask-mcp.vercel.app** in a browser.
