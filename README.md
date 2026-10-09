@@ -17,6 +17,37 @@ agent-callable MCP server, following the current MCP spec.
 > for a real, captured transcript of an MCP client calling it and getting
 > real, non-fabricated citations back.
 
+## Two usage modes, one engine
+
+**🧑 Human web UI:** open **https://repoask-mcp.vercel.app** in a browser.
+Type a public repo (`owner/repo` or a `github.com/...` URL), click **Index**,
+watch real file/chunk counts come back, then ask a natural-language question
+and get a real answer with exact file+line citations rendered on the page.
+No install, no MCP client, no CLI — just a normal website.
+
+**🤖 Agent MCP server:** point any MCP client (Claude Desktop, Cursor, a
+custom script) at **https://repoask-mcp.vercel.app/mcp** (Streamable HTTP) or
+run it locally over stdio. The agent gets the same three tools —
+`index_repo`, `ask_repo`, `list_indexed_repos` — with full Zod-validated
+JSON schemas.
+
+Both front ends call the **exact same TypeScript functions**
+(`doIndexRepo` / `doAskRepo` in [`src/engine.ts`](src/engine.ts)) — the MCP
+tool handlers in [`src/create-server.ts`](src/create-server.ts) and the human
+REST routes [`api/index-repo.ts`](api/index-repo.ts) /
+[`api/ask-repo.ts`](api/ask-repo.ts) are both thin wrappers around that one
+engine. Nothing is reimplemented twice; this is deliberate — it's the same
+real retrieval pipeline serving a human clicking a button and an agent
+calling a tool.
+
+*Why REST routes instead of the browser speaking raw MCP JSON-RPC?* The
+human UI needed simple request/response semantics a `<form>` can drive
+directly (no SSE/session-management client code in the browser just to prove
+a point); the MCP transport already exists and is dogfooded separately by
+`examples/run-http-session.ts`. The REST routes are the honest, minimal
+choice precisely because they share `src/engine.ts` rather than duplicating
+`index_repo`/`ask_repo` logic — the thing that would make them dishonest.
+
 ## What it does
 
 1. **`index_repo(owner, repo, ref?)`** — fetches a public GitHub repo's text
@@ -268,9 +299,18 @@ real stdio MCP calls to the compiled server. It asserts:
 
 ## Remote deployment status
 
-**LIVE on the public internet, no auth wall: https://repoask-mcp.vercel.app/mcp**
+**LIVE on the public internet, no auth wall: https://repoask-mcp.vercel.app**
 
-- `GET https://repoask-mcp.vercel.app/` → `200` health check JSON:
+- `GET https://repoask-mcp.vercel.app/` → `200` **the human web UI**
+  (`public/index.html`), not a bare JSON blob — a real visitor sees a styled
+  page with an index form and an ask form, not an API response.
+- `POST https://repoask-mcp.vercel.app/api/index-repo` and
+  `POST https://repoask-mcp.vercel.app/api/ask-repo` are the REST routes the
+  UI calls — verified live with `curl`, e.g.
+  `curl -s -X POST https://repoask-mcp.vercel.app/api/ask-repo -H 'content-type: application/json' -d '{"owner":"octocat","repo":"git-consortium","question":"What is this repository about?"}'`
+  returns a real `answerMode: "deterministic"` response with 4 citations
+  (`product-backlog.md`, `README.md` with exact line ranges).
+- `GET https://repoask-mcp.vercel.app/mcp` → `200` MCP health check JSON:
   `{"name":"repoask-mcp","transport":"streamable-http","mcpEndpoint":"/mcp","status":"ok"}`
 - `POST https://repoask-mcp.vercel.app/mcp` is the real Streamable HTTP MCP
   endpoint — reachable by any external MCP client, unauthenticated, from any

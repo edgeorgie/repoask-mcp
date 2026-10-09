@@ -1,11 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "builds": [
-    { "src": "api/mcp.ts", "use": "@vercel/node" }
+    { "src": "api/mcp.ts", "use": "@vercel/node" },
+    { "src": "api/index-repo.ts", "use": "@vercel/node" },
+    { "src": "api/ask-repo.ts", "use": "@vercel/node" },
+    { "src": "public/**", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/mcp", "dest": "/api/mcp.ts" },
-    { "src": "/", "dest": "/api/mcp.ts" },
-    { "src": "/(.*)", "dest": "/api/mcp.ts" }
+    { "src": "/api/mcp", "dest": "/api/mcp.ts" },
+    { "src": "/api/index-repo", "dest": "/api/index-repo.ts" },
+    { "src": "/api/ask-repo", "dest": "/api/ask-repo.ts" },
+    { "src": "/", "dest": "/public/index.html" },
+    { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }

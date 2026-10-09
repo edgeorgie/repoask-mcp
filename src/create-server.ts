@@ -5,14 +5,15 @@
  * Both transports (stdio in server.ts, Streamable HTTP in http-server.ts /
  * api/mcp.ts) call this so the tool definitions live in exactly one place —
  * no logic duplicated between the local and remote entrypoints.
+ *
+ * The actual index/ask/list implementations live in src/engine.ts and are
+ * shared with the human-facing REST routes (api/index-repo.ts, api/ask-repo.ts)
+ * so the MCP tools and the web UI are provably the same engine.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { indexRepo } from "./indexer.js";
-import { retrieve } from "./retrieval.js";
-import { saveIndex, loadIndex, keyOf, listIndexed } from "./store.js";
-import { synthesize, deterministicAnswer } from "./llm.js";
+import { doIndexRepo, doAskRepo, doListIndexedRepos } from "./engine.js";
 
 export function createRepoaskServer(): McpServer {
   const server = new McpServer({
@@ -50,25 +51,15 @@ export function createRepoaskServer(): McpServer {
       },
     },
     async ({ owner, repo, ref }) => {
-      const index = await indexRepo({ owner, repo, ref });
-      const key = keyOf(owner, repo);
-      await saveIndex(key, index);
-      const structured = {
-        owner,
-        repo,
-        branch: index.branch,
-        fileCount: index.fileCount,
-        chunkCount: index.chunkCount,
-        truncated: index.truncated,
-        indexedAt: index.indexedAt,
-      };
+      const result = await doIndexRepo(owner, repo, ref);
+      const structured: Record<string, unknown> = { ...result };
       return {
         content: [
           {
             type: "text",
             text:
-              `Indexed ${owner}/${repo}@${index.branch}: ${index.fileCount} files -> ${index.chunkCount} chunks. ` +
-              (index.truncated ? "(GitHub truncated the file tree; only a subset of the repo was seen.) " : "") +
+              `Indexed ${owner}/${repo}@${result.branch}: ${result.fileCount} files -> ${result.chunkCount} chunks. ` +
+              (result.truncated ? "(GitHub truncated the file tree; only a subset of the repo was seen.) " : "") +
               `Call ask_repo({ owner: "${owner}", repo: "${repo}", question: ... }) next.`,
           },
         ],
@@ -116,37 +107,10 @@ export function createRepoaskServer(): McpServer {
       },
     },
     async ({ owner, repo, question, topK }) => {
-      const key = keyOf(owner, repo);
-      let index = await loadIndex(key);
-      if (!index) {
-        index = await indexRepo({ owner, repo });
-        await saveIndex(key, index);
-      }
-      const citations = retrieve(index, question, topK ?? 6);
-      const repoLabel = `${owner}/${repo}`;
-      const chunksForPrompt = citations.map((c) => ({ path: c.path, start: c.startLine, end: c.endLine, text: c.excerpt }));
-
-      let answer: string;
-      let answerMode: "llm" | "deterministic";
-      let model: string | undefined;
-      try {
-        const synth = await synthesize(question, repoLabel, chunksForPrompt);
-        if (synth) {
-          answer = synth.answer;
-          answerMode = "llm";
-          model = synth.model;
-        } else {
-          answer = deterministicAnswer(chunksForPrompt);
-          answerMode = "deterministic";
-        }
-      } catch (err) {
-        answer = `LLM synthesis failed (${(err as Error).message}); falling back to citations.\n\n${deterministicAnswer(chunksForPrompt)}`;
-        answerMode = "deterministic";
-      }
-
-      const structured = { owner, repo, question, answer, answerMode, model, citations };
+      const result = await doAskRepo(owner, repo, question, topK);
+      const structured: Record<string, unknown> = { ...result };
       return {
-        content: [{ type: "text", text: answer }],
+        content: [{ type: "text", text: result.answer }],
         structuredContent: structured,
       };
     },
@@ -163,7 +127,7 @@ export function createRepoaskServer(): McpServer {
       },
     },
     async () => {
-      const repos = listIndexed();
+      const repos = doListIndexedRepos();
       return {
         content: [{ type: "text", text: repos.length ? repos.join(", ") : "(no repos indexed yet in this process)" }],
         structuredContent: { repos },

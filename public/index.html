@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>repoask-mcp — ask any public GitHub repo a question</title>
+<meta name="description" content="Index a public GitHub repository and ask it natural-language questions, with real file+line citations. The same engine that powers the repoask-mcp MCP server for agents." />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <span class="logo">⌁</span>
+        <div>
+          <h1>repoask-mcp</h1>
+          <p class="tagline">Ask any public GitHub repo a question — with real citations.</p>
+        </div>
+      </div>
+      <div class="badges">
+        <a class="badge" href="https://github.com/edgeorgie/repoask-mcp" target="_blank" rel="noopener">GitHub</a>
+        <a class="badge" href="/mcp" target="_blank" rel="noopener">MCP endpoint</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" id="index-panel">
+        <h2><span class="step-no">1</span> Index a repository</h2>
+        <p class="hint">Enter a public GitHub repo as <code>owner/repo</code> or a full URL.</p>
+        <form id="index-form">
+          <input id="repo-input" type="text" placeholder="octocat/Hello-World" autocomplete="off" required />
+          <button type="submit" id="index-btn">Index</button>
+        </form>
+        <div id="index-status" class="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" id="ask-panel" hidden>
+        <h2><span class="step-no">2</span> Ask a question</h2>
+        <p class="hint">Indexed: <strong id="indexed-repo-label"></strong></p>
+        <form id="ask-form">
+          <input id="question-input" type="text" placeholder="What does this repo do?" autocomplete="off" required />
+          <button type="submit" id="ask-btn">Ask</button>
+        </form>
+        <div id="ask-status" class="status" aria-live="polite"></div>
+        <article id="answer-card" class="answer-card" hidden>
+          <div class="answer-mode" id="answer-mode"></div>
+          <div class="answer-text" id="answer-text"></div>
+          <h3>Citations</h3>
+          <ol id="citations-list" class="citations"></ol>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Same underlying engine as the public MCP server at <code>/mcp</code> (tools: <code>index_repo</code>,
+        <code>ask_repo</code>, <code>list_indexed_repos</code>) — this page just calls
+        <code>/api/index-repo</code> and <code>/api/ask-repo</code>, two thin REST wrappers around the exact
+        same TypeScript functions the MCP tool handlers call. One engine, two front doors: agents via MCP,
+        humans via this UI. <a href="https://github.com/edgeorgie/repoask-mcp#readme" target="_blank" rel="noopener">Read the README</a>.
+      </p>
+    </footer>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
