@@ -1,13 +1,12 @@
 /**
  * Builds a RepoIndex: fetches a public GitHub repo's text files, chunks them into
  * overlapping line windows, and embeds every chunk with a TF-IDF model fitted on the
- * whole corpus. Mirrors edgeorgie/repoask's lib/indexer.ts pipeline but runs headlessly
- * in Node for an MCP server instead of in a browser with a Worker.
+ * whole corpus. Chunking/embedding come from @edgeorgie/retrieval-core (shared with
+ * ask-edgeorgie-mcp); this file owns the GitHub-fetch-specific indexing orchestration.
  */
 
-import { chunkFile, embedText, type Chunk } from "./chunk.js";
+import { chunkFile, embedText, fitTfidf, embedBatchTfidf, type Chunk, type TfidfModel, type Vector } from "@edgeorgie/retrieval-core";
 import { fetchFileText, fetchRepoFiles, type RepoRef } from "./repo.js";
-import { fitTfidf, embedBatchTfidf, type TfidfModel, type Vector } from "./embedder.js";
 
 export interface RepoIndex {
   ref: RepoRef;

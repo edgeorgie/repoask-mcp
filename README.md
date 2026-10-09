@@ -289,13 +289,26 @@ real stdio MCP calls to the compiled server. It asserts:
 
 | Concern | repoask (browser) | repoask-mcp (this repo) |
 |---|---|---|
-| Chunking | `lib/chunk.ts` — 40-line windows, 6-line overlap, markdown-aware | **Ported line-for-line** into `src/chunk.ts` |
+| Chunking | `lib/chunk.ts` — 40-line windows, 6-line overlap, markdown-aware | **Ported line-for-line**, now published as [`@edgeorgie/retrieval-core`](https://github.com/edgeorgie/retrieval-core)'s `chunk.ts` |
 | File selection/fetching | `lib/repo.ts` — GitHub REST + raw.githubusercontent.com, text-extension allowlist, skip vendored/lockfiles | **Ported** into `src/repo.ts`, using Node's global `fetch` instead of browser `fetch` |
-| Embedding | `lib/embedder.ts` + `lib/embed.worker.ts` — in-browser transformer model via a Web Worker (`@xenova/transformers`) | **Replaced** with a local TF-IDF embedder (`src/embedder.ts`) — a Web Worker + browser-only transformer model has no equivalent in a headless Node MCP server, and TF-IDF keeps the "no paid key for retrieval" guarantee with zero model download |
-| Vector scoring | `lib/vector.ts` — dot product + diversify-by-file | **Ported line-for-line** into `src/vector.ts` |
-| Prompt building / citations | `lib/rag.ts` — numbered sources, `[n]` citation parsing | **Ported** into `src/rag.ts` |
+| Embedding | `lib/embedder.ts` + `lib/embed.worker.ts` — in-browser transformer model via a Web Worker (`@xenova/transformers`) | **Replaced** with a local TF-IDF embedder, now in `@edgeorgie/retrieval-core`'s `embedder.ts` — a Web Worker + browser-only transformer model has no equivalent in a headless Node MCP server, and TF-IDF keeps the "no paid key for retrieval" guarantee with zero model download |
+| Vector scoring | `lib/vector.ts` — dot product + diversify-by-file | **Ported line-for-line**, now `@edgeorgie/retrieval-core`'s `vector.ts` |
+| Prompt building / citations | `lib/rag.ts` — numbered sources, `[n]` citation parsing | **Ported**, now `@edgeorgie/retrieval-core`'s `rag.ts` |
 | Answer synthesis | `lib/llm.ts` — BYO browser key, Anthropic/OpenAI | **Re-implemented** server-side (`src/llm.ts`) reading the key from the server process's environment instead of a browser-stored key, with the same optional/fallback contract |
 | Transport | Next.js app, human clicks a button | **New**: `@modelcontextprotocol/sdk` `McpServer` over stdio — an agent calls the tools directly |
+
+**Shared with ask-edgeorgie-mcp:** a direct diff of this repo's `chunk.ts`,
+`vector.ts`, `embedder.ts` and `rag.ts` against
+[edgeorgie/ask-edgeorgie-mcp](https://github.com/edgeorgie/ask-edgeorgie-mcp)
+showed they were byte-identical — both servers run the same local TF-IDF
+chunking/scoring/prompt-building logic over different corpora (a fetched
+GitHub repo here, a local resume/evidence corpus there). That shared slice
+is now extracted into
+[`@edgeorgie/retrieval-core`](https://github.com/edgeorgie/retrieval-core)
+and consumed by both repos as a git dependency instead of being
+copy-pasted. The parts that are genuinely different per server — indexing
+orchestration, the retrieval entrypoint, tool/engine logic — stay local to
+each repo; they weren't forced into the shared package.
 
 ## Remote deployment status
 

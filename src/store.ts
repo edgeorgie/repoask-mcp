@@ -8,7 +8,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RepoIndex } from "./indexer.js";
-import type { TfidfModel } from "./embedder.js";
+import type { TfidfModel } from "@edgeorgie/retrieval-core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = process.env.REPOASK_CACHE_DIR ?? path.join(__dirname, "..", ".repoask-cache");

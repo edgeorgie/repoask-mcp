@@ -1,14 +1,12 @@
 /**
  * Core retrieval: given an already-built RepoIndex and a question, embeds the question
  * with the SAME fitted TF-IDF model, scores every chunk, diversifies across files, and
- * returns the top chunks with their citations. Mirrors repoask's retrieval contract
- * (lib/vector.ts topK + diversify, lib/rag.ts buildPrompt/citedIndexes).
+ * returns the top chunks with their citations. Scoring (embedTfidf/topK/diversify) comes
+ * from @edgeorgie/retrieval-core, shared verbatim with ask-edgeorgie-mcp.
  */
 
 import type { RepoIndex } from "./indexer.js";
-import { embedTfidf } from "./embedder.js";
-import { topK, diversify, type Scored } from "./vector.js";
-import type { Chunk } from "./chunk.js";
+import { embedTfidf, topK, diversify, type Scored, type Chunk } from "@edgeorgie/retrieval-core";
 
 export interface Citation {
   rank: number;
