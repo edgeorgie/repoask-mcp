@@ -1,0 +1,43 @@
+{
+  "name": "repoask-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that lets an agent ask a public GitHub repository questions and get answers with exact file+line citations. Retrieval runs locally via TF-IDF (no paid API key required); an LLM key is optional and used only for final answer synthesis, with a deterministic citation-only fallback when absent.",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "repoask-mcp": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edgeorgie/repoask-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "github",
+    "rag",
+    "retrieval",
+    "agent-tool"
+  ],
+  "author": "edgeorgie",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/edgeorgie/repoask-mcp/issues"
+  },
+  "homepage": "https://github.com/edgeorgie/repoask-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
