@@ -103,12 +103,20 @@ export async function synthesize(question: string, repoLabel: string, chunks: Ch
 
   if (anthropicKey) {
     const model = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5";
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-api-key": anthropicKey,
         "anthropic-version": "2023-06-01",
+        // Org-scoped API keys (not scoped to a single workspace) are
+        // rejected by Anthropic with a 400 unless this header identifies
+        // which workspace to bill/run under. Harmless to omit if the key
+        // is already workspace-scoped (Anthropic ignores an absent header
+        // in that case), so this is additive, not a behavior change for
+        // workspace-scoped keys.
+        ...(workspaceId ? { "anthropic-workspace-id": workspaceId } : {}),
       },
       body: JSON.stringify({
         model,
