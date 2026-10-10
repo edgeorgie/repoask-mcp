@@ -272,6 +272,10 @@ node --import tsx examples/run-http-session.ts https://<your-deployment-domain>/
 npm test
 ```
 
+`npm test` runs a `pretest` hook (`npm run build`) first, so a fresh clone +
+`npm install && npm test` works out of the box — tests import the compiled
+`dist/` output, which didn't exist before `pretest` was wired in.
+
 `tests/server.test.ts` makes real network calls to GitHub (no mocking) and
 real stdio MCP calls to the compiled server. It asserts:
 - `list_tools` returns exactly `index_repo`, `ask_repo`, `list_indexed_repos`

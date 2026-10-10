@@ -13,6 +13,7 @@
     "start:http": "node dist/http-server.js",
     "dev": "tsx src/server.ts",
     "dev:http": "tsx src/http-server.ts",
+    "pretest": "npm run build",
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "repository": {
