@@ -37,6 +37,9 @@
       <section class="panel" id="ask-panel" hidden>
         <h2><span class="step-no">2</span> Ask a question</h2>
         <p class="hint">Indexed: <strong id="indexed-repo-label"></strong></p>
+        <p class="hint" style="opacity:.7">No LLM key is configured on this deployment, so answers return as a
+          direct, cited excerpt dump rather than generated prose. Retrieval and citations are real either way —
+          check the answer-mode line under each reply.</p>
         <form id="ask-form">
           <input id="question-input" type="text" placeholder="What does this repo do?" autocomplete="off" required />
           <button type="submit" id="ask-btn">Ask</button>
