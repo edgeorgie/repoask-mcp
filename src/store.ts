@@ -24,7 +24,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RepoIndex } from "./indexer.js";
-import type { TfidfModel } from "@edgeorgie/retrieval-core";
+import { tokenize, type TfidfModel } from "@edgeorgie/retrieval-core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +49,9 @@ const memory = new Map<string, RepoIndex>();
 /** Warn once per process rather than on every write, so logs stay readable. */
 let persistWarned = false;
 
+/** Same once-per-process discipline for the stale-index notice. */
+let staleWarned = false;
+
 export function keyOf(owner: string, repo: string): string {
   return `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 }
@@ -56,6 +59,33 @@ export function keyOf(owner: string, repo: string): string {
 function cacheFile(key: string): string {
   return path.join(CACHE_DIR, `${key.replace("/", "__")}.json`);
 }
+
+/**
+ * Fingerprint of the tokenizer that built a persisted index.
+ *
+ * A persisted index embeds `vocab` and `idf` — both derived entirely from
+ * `tokenize()` in `@edgeorgie/retrieval-core`. When that dependency's
+ * tokenizer changes, a cached index keeps the OLD vocabulary forever: the
+ * loader has no way to notice, every repo-level check stays green, and live
+ * retrieval silently runs on a vocabulary the current code would never
+ * produce. That is exactly what happened across two consecutive dependency
+ * bumps (camelCase splitting, then sub-token stopword filtering), where the
+ * only recovery was an operator remembering to re-POST every indexed repo.
+ *
+ * Rather than a hand-maintained version constant — which drifts the first time
+ * someone bumps the dependency and forgets to bump the number — this derives
+ * the fingerprint BEHAVIOURALLY, by running the real tokenizer over a probe
+ * string chosen to exercise every branch that has changed historically:
+ * camelCase splitting, consecutive capitals, snake_case, and stopword
+ * filtering on both the whole-token and sub-token paths. Any change to
+ * tokenization observable on those paths changes this string, and every
+ * persisted index built by the old behaviour is discarded and rebuilt
+ * automatically on next access.
+ *
+ * Cost is one `tokenize()` call per process, at module load.
+ */
+const TOKENIZER_PROBE = "getUserName HTTPServer of_the_thing toString isValid";
+const TOKENIZER_FINGERPRINT = tokenize(TOKENIZER_PROBE).join(",");
 
 interface SerializedIndex {
   ref: RepoIndex["ref"];
@@ -68,6 +98,13 @@ interface SerializedIndex {
   chunkCount: number;
   truncated: boolean;
   indexedAt: string;
+  /**
+   * Optional because indexes persisted before this field existed have no value
+   * for it. A missing fingerprint cannot match the current one, so those are
+   * treated as stale and rebuilt — which is the correct outcome: they were
+   * written by the tokenizer this field exists to detect changes in.
+   */
+  tokenizerFingerprint?: string;
 }
 
 export async function saveIndex(key: string, index: RepoIndex): Promise<void> {
@@ -85,6 +122,7 @@ export async function saveIndex(key: string, index: RepoIndex): Promise<void> {
     chunkCount: index.chunkCount,
     truncated: index.truncated,
     indexedAt: index.indexedAt,
+    tokenizerFingerprint: TOKENIZER_FINGERPRINT,
   };
   try {
     await fs.mkdir(CACHE_DIR, { recursive: true });
@@ -109,6 +147,25 @@ export async function loadIndex(key: string): Promise<RepoIndex | null> {
   try {
     const raw = await fs.readFile(cacheFile(key), "utf8");
     const s = JSON.parse(raw) as SerializedIndex;
+    if (s.tokenizerFingerprint !== TOKENIZER_FINGERPRINT) {
+      // The persisted vocab/idf were built by a different tokenizer, so every
+      // query vector this process produces would be scored against a
+      // vocabulary that no longer matches how text is tokenized. Returning
+      // null makes the caller re-index from GitHub, which is the only correct
+      // recovery — serving the stale index would silently degrade retrieval
+      // with nothing anywhere reporting a problem. Deleting the file would be
+      // equivalent but loses forensic information for no benefit; it is
+      // overwritten by the rebuild anyway.
+      if (!staleWarned) {
+        staleWarned = true;
+        console.warn(
+          `[store] discarding cached indexes built by a different tokenizer ` +
+            `(cached ${JSON.stringify(s.tokenizerFingerprint ?? null)}, current ` +
+            `${JSON.stringify(TOKENIZER_FINGERPRINT)}); affected repos re-index on next access.`,
+        );
+      }
+      return null;
+    }
     const model: TfidfModel = { vocab: new Map(s.vocab), idf: Float32Array.from(s.idf) };
     const index: RepoIndex = {
       ref: s.ref,
