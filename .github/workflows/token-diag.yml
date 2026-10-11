@@ -1,0 +1,43 @@
+name: Token diagnostic (temporary)
+
+# TEMPORARY diagnostic to find out empirically whether the Actions
+# GITHUB_TOKEN can read a DIFFERENT public repo (the test suite reads
+# octocat/Spoon-Knife, not this repo). Removed before merge.
+on:
+  workflow_dispatch:
+  push:
+    branches: [security/rate-limit-audit-and-honest-claims]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cross-repo read WITHOUT token
+        run: |
+          code=$(curl -s -o /tmp/a.json -w '%{http_code}' \
+            -H 'User-Agent: repoask-mcp' \
+            https://api.github.com/repos/octocat/Spoon-Knife)
+          echo "NO_TOKEN_STATUS=$code"
+          head -c 200 /tmp/a.json; echo
+
+      - name: Cross-repo read WITH secrets.GITHUB_TOKEN
+        env:
+          GH: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -s -o /tmp/b.json -w '%{http_code}' \
+            -H 'User-Agent: repoask-mcp' \
+            -H "Authorization: Bearer $GH" \
+            https://api.github.com/repos/octocat/Spoon-Knife)
+          echo "WITH_TOKEN_STATUS=$code"
+          head -c 400 /tmp/b.json; echo
+
+      - name: Cross-repo TREE read WITH secrets.GITHUB_TOKEN
+        env:
+          GH: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -s -o /tmp/c.json -w '%{http_code}' \
+            -H 'User-Agent: repoask-mcp' \
+            -H "Authorization: Bearer $GH" \
+            'https://api.github.com/repos/octocat/Spoon-Knife/git/trees/main?recursive=1')
+          echo "TREE_WITH_TOKEN_STATUS=$code"
+          head -c 400 /tmp/c.json; echo
