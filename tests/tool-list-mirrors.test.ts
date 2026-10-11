@@ -130,19 +130,69 @@ async function read(...parts: string[]): Promise<string> {
  * documented both directions as covered, and a mutation adding `purge_index`
  * to the README's `list_tools` claim left it 11/11 green.
  *
- * The cost of shape detection is this list. It is short, closed, and the test
- * below asserts it stays disjoint from the real tool set — so if one of these
- * names ever becomes a tool, the allowlist cannot silently swallow it.
+ * The cost of shape detection is this list. It is short, and the test below
+ * asserts it stays disjoint from the real tool set — so if one of these names
+ * ever becomes a tool, the allowlist cannot silently swallow it.
+ *
+ * The analytics event names are DERIVED from `src/analytics.ts`'s
+ * `AnalyticsEvent` union rather than restated here, because a restated copy is
+ * exactly the kind of hand-maintained mirror this whole file exists to
+ * eliminate — and it fails in the loud-but-wrong direction: the day the union
+ * gains a member, that new event name appears in the prose, is read as a
+ * claimed tool, and fails every mirror assertion at once with a message
+ * blaming the docs for a drift that is really in this allowlist.
  */
+const ANALYTICS_EVENT_NAMES = await analyticsEventNames();
 const NON_TOOL_IDENTIFIERS = new Set([
-  // PostHog event names (src/analytics.ts's AnalyticsEvent union).
-  "repo_asked",
-  "index_built",
-  "mcp_tool_called",
-  "rate_limited",
+  ...ANALYTICS_EVENT_NAMES,
   // The MCP protocol method, not a tool this server registers.
   "list_tools",
 ]);
+
+/**
+ * The `AnalyticsEvent` union's members, read out of the source.
+ *
+ * Source text, not a runtime import: the union is a TYPE, erased at runtime,
+ * so there is no value to read. Parsing its declaration is the only way to
+ * derive it, and it is the same technique every assertion in this file already
+ * uses on the prose mirrors.
+ *
+ * Two failure modes are handled explicitly, both found by mutation:
+ *
+ *   1. A RENAMED or missing declaration throws, loudly, naming the file and
+ *      the expected text — rather than falling back to an empty set, which
+ *      would turn every analytics event name in the prose into a phantom tool
+ *      and fail every mirror assertion with a message blaming the docs.
+ *   2. A declaration whose trailing `;` is absent (valid TS) must not let the
+ *      capture run on into the NEXT declaration. A naive `=([^;]+);` does
+ *      exactly that: reformatting this union across several lines made it
+ *      swallow `export type Surface` and quietly adopt `"web" | "mcp"` as
+ *      non-tool vocabulary. The capture therefore stops at the first `;` or
+ *      the next top-level `export`, whichever comes first, and the result is
+ *      asserted to contain no `export` keyword.
+ */
+async function analyticsEventNames(): Promise<string[]> {
+  const source = await read("src", "analytics.ts");
+  const declaration = /export type AnalyticsEvent\s*=([\s\S]*?)(?:;|(?=\bexport\b))/.exec(source);
+  if (!declaration) {
+    throw new Error(
+      "could not locate `export type AnalyticsEvent = ...` in src/analytics.ts — " +
+        "this guard's non-tool allowlist derives from it and must not fall back to an empty set",
+    );
+  }
+  const body = declaration[1];
+  assert.ok(
+    !body.includes("export"),
+    `AnalyticsEvent's declaration capture ran past its own end into the next declaration: ` +
+      `${JSON.stringify(body)} — it would adopt an unrelated union's members as non-tool vocabulary`,
+  );
+  const names = [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(
+    names.length > 0,
+    `AnalyticsEvent's declaration yielded no string-literal members: ${JSON.stringify(body)}`,
+  );
+  return names;
+}
 
 /**
  * Every tool the text CLAIMS exists, by shape: snake_case identifiers minus
