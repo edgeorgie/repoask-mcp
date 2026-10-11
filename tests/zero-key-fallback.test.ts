@@ -19,6 +19,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { synthesize, deterministicAnswer } from "../src/llm.js";
+import { serverEnv } from "./helpers/server-env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = path.join(__dirname, "..", "dist", "server.js");
@@ -66,11 +67,7 @@ test("ask_repo returns answerMode exactly 'deterministic' when the server has no
   // the README's claim actually needs: a STRICT equality on "deterministic",
   // forced by configuration we control here, not by whatever the ambient
   // environment happens to be.
-  const childEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === "ANTHROPIC_API_KEY" || k === "OPENAI_API_KEY") continue;
-    if (v !== undefined) childEnv[k] = v;
-  }
+  const childEnv = serverEnv({ without: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"] });
 
   const transport = new StdioClientTransport({
     command: "node",
@@ -105,7 +102,11 @@ test("ask_repo returns answerMode exactly 'deterministic' when the server has no
 });
 
 test("ask_repo rejects an over-long question before indexing or any LLM call", async () => {
-  const transport = new StdioClientTransport({ command: "node", args: [SERVER_PATH] });
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [SERVER_PATH],
+    env: serverEnv(),
+  });
   const client = new Client({ name: "repoask-mcp-length-test-client", version: "1.0.0" });
   await client.connect(transport);
   try {

@@ -11,6 +11,11 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promises as fs } from "node:fs";
+// Shared with the test suite deliberately: the SDK's stdio transport forwards
+// only its own small allow-list to the child unless `env` is given, so without
+// this the captured transcript would be a recording of an UNAUTHENTICATED
+// server (60 GitHub req/hour/IP) regardless of the operator's own environment.
+import { serverEnv } from "../tests/helpers/server-env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -25,7 +30,11 @@ interface TranscriptEntry {
 
 async function main() {
   const transcript: TranscriptEntry[] = [];
-  const transport = new StdioClientTransport({ command: "node", args: [SERVER_PATH] });
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [SERVER_PATH],
+    env: serverEnv(),
+  });
   const client = new Client({ name: "repoask-mcp-example-session", version: "1.0.0" });
   await client.connect(transport);
 
