@@ -29,6 +29,7 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createRepoaskServer } from "./create-server.js";
 import { checkRateLimit, getClientId } from "./rate-limit.js";
+import { capture } from "./analytics.js";
 
 export async function handleMcpRequest(req: express.Request, res: express.Response): Promise<void> {
   // Stateless: a new server + transport per request, per SDK's documented
@@ -68,6 +69,9 @@ export function createApp(): express.Express {
     const callerId = getClientId(req);
     const limit = checkRateLimit(callerId);
     if (!limit.allowed) {
+      // Same analytics contract as api/mcp.ts: awaited before the 429 is
+      // written, a no-op without POSTHOG_KEY, never a reason for a failure.
+      await capture("rate_limited", { surface: "mcp", reason: limit.reason === "global" ? "global" : "per-caller" });
       res.setHeader("Retry-After", String(limit.retryAfterSeconds ?? 60));
       res.status(429).json({
         jsonrpc: "2.0",

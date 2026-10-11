@@ -9,11 +9,21 @@
  * The actual index/ask/list implementations live in src/engine.ts and are
  * shared with the human-facing REST routes (api/index-repo.ts, api/ask-repo.ts)
  * so the MCP tools and the web UI are provably the same engine.
+ *
+ * ANALYTICS: with POSTHOG_KEY set, each completed tool call is counted as
+ * `mcp_tool_called`, and the two tools that do work also report their outcome
+ * (`index_built`, `repo_asked`, with `surface: "mcp"`) through
+ * src/analytics.ts. Never the question, the answer or any excerpt. Each
+ * capture is awaited before the handler returns, so it has completed before
+ * the transport writes the response (a serverless function can be frozen right
+ * after that). `capture` cannot throw, so nothing here can turn a tool result
+ * into a tool error; without the key it returns immediately.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { doIndexRepo, doAskRepo, doListIndexedRepos } from "./engine.js";
+import { capture, indexBuiltProperties, repoAskedProperties } from "./analytics.js";
 
 export function createRepoaskServer(): McpServer {
   const server = new McpServer({
@@ -51,7 +61,12 @@ export function createRepoaskServer(): McpServer {
       },
     },
     async ({ owner, repo, ref }) => {
+      const startedAt = Date.now();
       const result = await doIndexRepo(owner, repo, ref);
+      await Promise.all([
+        capture("mcp_tool_called", { tool: "index_repo" }),
+        capture("index_built", indexBuiltProperties("mcp", owner, repo, result.chunkCount, Date.now() - startedAt)),
+      ]);
       const structured: Record<string, unknown> = { ...result };
       return {
         content: [
@@ -107,7 +122,12 @@ export function createRepoaskServer(): McpServer {
       },
     },
     async ({ owner, repo, question, topK }) => {
+      const startedAt = Date.now();
       const result = await doAskRepo(owner, repo, question, topK);
+      await Promise.all([
+        capture("mcp_tool_called", { tool: "ask_repo" }),
+        capture("repo_asked", repoAskedProperties("mcp", owner, repo, question.length, result, Date.now() - startedAt)),
+      ]);
       const structured: Record<string, unknown> = { ...result };
       return {
         content: [{ type: "text", text: result.answer }],
@@ -128,6 +148,7 @@ export function createRepoaskServer(): McpServer {
     },
     async () => {
       const repos = doListIndexedRepos();
+      await capture("mcp_tool_called", { tool: "list_indexed_repos" });
       return {
         content: [{ type: "text", text: repos.length ? repos.join(", ") : "(no repos indexed yet in this process)" }],
         structuredContent: { repos },

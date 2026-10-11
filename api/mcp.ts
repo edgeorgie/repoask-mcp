@@ -23,6 +23,7 @@
 import type { VercelRequest, VercelResponse } from "../src/vercel-types.js";
 import { handleMcpRequest } from "../src/http-server.js";
 import { checkRateLimit, getClientId } from "../src/rate-limit.js";
+import { capture } from "../src/analytics.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method === "GET") {
@@ -48,6 +49,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const callerId = getClientId(req as unknown as { headers: Record<string, unknown>; socket?: { remoteAddress?: string } });
   const limit = checkRateLimit(callerId);
   if (!limit.allowed) {
+    // Awaited before the 429 is written; see api/ask-repo.ts for why. The
+    // tool-level events for this transport fire in src/create-server.ts.
+    await capture("rate_limited", { surface: "mcp", reason: limit.reason === "global" ? "global" : "per-caller" });
     res.setHeader("Retry-After", String(limit.retryAfterSeconds ?? 60));
     res.status(429).json({
       jsonrpc: "2.0",

@@ -10,11 +10,20 @@
  * prompt. It is therefore rate limited (src/rate-limit.ts) and question
  * length is capped, both checked before any indexing or LLM work happens.
  * See src/rate-limit.ts for the full rationale and known limitations.
+ *
+ * ANALYTICS: with POSTHOG_KEY set, the outcome of each request is reported
+ * through src/analytics.ts as an event name plus the public repo, buckets,
+ * booleans and durations; never the question or the answer. Each capture is
+ * awaited BEFORE the response is written, because Vercel can freeze the
+ * function the moment the response ends and a capture started after that
+ * may never leave the instance. `capture` cannot throw, so it cannot change
+ * the HTTP result; without the key it returns immediately.
  */
 
 import type { VercelRequest, VercelResponse } from "../src/vercel-types.js";
 import { doAskRepo } from "../src/engine.js";
 import { checkRateLimit, checkQuestionLength, getClientId } from "../src/rate-limit.js";
+import { capture, repoAskedProperties } from "../src/analytics.js";
 
 /**
  * CORS: narrowed from the previous `Access-Control-Allow-Origin: *`.
@@ -60,6 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const callerId = getClientId(req as unknown as { headers: Record<string, unknown>; socket?: { remoteAddress?: string } });
   const limit = checkRateLimit(callerId);
   if (!limit.allowed) {
+    await capture("rate_limited", { surface: "web", reason: limit.reason === "global" ? "global" : "per-caller" });
     res.setHeader("Retry-After", String(limit.retryAfterSeconds ?? 60));
     res.status(429).json({
       error: `Rate limit exceeded (${limit.reason === "global" ? "global" : "per-caller"} limit). Retry after ${limit.retryAfterSeconds}s.`,
@@ -84,7 +94,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       res.status(400).json({ error: lengthCheck.error });
       return;
     }
+    const startedAt = Date.now();
     const result = await doAskRepo(owner.trim(), repo.trim(), question.trim(), topK);
+    await capture(
+      "repo_asked",
+      repoAskedProperties("web", result.owner, result.repo, result.question.length, result, Date.now() - startedAt),
+    );
     res.status(200).json(result);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

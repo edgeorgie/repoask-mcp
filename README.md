@@ -206,6 +206,53 @@ npm run dev         # tsx src/server.ts (stdio)
 npm run dev:http    # tsx src/http-server.ts (HTTP, :3000)
 ```
 
+### Environment variables
+
+All optional. The server reads them from its own process environment: the
+`env` block of the MCP client config below for the stdio transport, the
+project's environment variables on Vercel.
+
+| Variable | Effect when set |
+| --- | --- |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Enables LLM answer synthesis in `ask_repo` (`answerMode: "llm"`). Without either, answers are the deterministic citation-only fallback. `ANTHROPIC_MODEL` / `OPENAI_MODEL` override the default model; `ANTHROPIC_WORKSPACE_ID` is required by org-scoped Anthropic keys. |
+| `GITHUB_TOKEN` | Sent to the GitHub API, raising its unauthenticated rate limit. |
+| `REPOASK_CACHE_DIR` | Where persisted indexes are written. Defaults to `/tmp/.repoask-cache` on a serverless runtime and to `.repoask-cache/` in the repo otherwise (`src/store.ts`). |
+| `PORT` | Listen port for `npm run start:http`. Default `3000`. |
+| `POSTHOG_KEY` | Turns on server-side product analytics (`src/analytics.ts`). Unset, which is the default, nothing is constructed or sent. |
+
+#### Analytics (`POSTHOG_KEY`)
+
+Server-side product analytics, off unless `POSTHOG_KEY` is set. Unset, the
+facade in [`src/analytics.ts`](src/analytics.ts) is a complete no-op: no client
+is created, no request leaves the function, nothing is logged. Set it in the
+Vercel project's environment variables to start recording; there is no browser
+SDK, and the web UI's usage shows up through the REST routes as `surface: "web"`.
+
+With a key, four events go to PostHog (US cloud, via
+[posthog-node](https://github.com/PostHog/posthog-js/tree/main/packages/node)):
+
+| Event | Properties | Fires |
+| --- | --- | --- |
+| `repo_asked` | `surface`, `repo`, `question_length_bucket`, `latency_ms`, `cited`, `citations` | After `POST /api/ask-repo` computes its answer (`web`) and after the `ask_repo` tool does (`mcp`) |
+| `index_built` | `surface`, `repo`, `chunk_bucket`, `duration_ms` | After `POST /api/index-repo` (`web`) and the `index_repo` tool (`mcp`) build an index. The implicit index `ask_repo` builds on a first question is not reported separately. |
+| `mcp_tool_called` | `tool` | After each `index_repo`, `ask_repo` and `list_indexed_repos` call |
+| `rate_limited` | `surface`, `reason` (`per-caller` or `global`) | When the rate limiter rejects a request on a REST route (`web`) or `/mcp` (`mcp`) |
+
+Every event also carries `app: "repoask-mcp"` and a fresh random id with no
+person profile. `repo` is the lowercased public `owner/name` of a repository
+GitHub has just served; lengths and chunk counts are reported as buckets
+(`<40`, `40-120`, `120-300`, `300+` characters; `<50` to `1500+` chunks). Never
+sent: the question, the answer, file contents or excerpts, caller IPs, or
+anything else that is not a bucket, a count, a boolean, a duration or a public
+repository name.
+
+Each capture is awaited before the HTTP response is written, because a
+serverless function can be frozen the moment the response ends. That wait is
+bounded: one attempt with a 3 s timeout, no retries, and a failed send is
+dropped silently, so a PostHog outage cannot fail a request or hold an answer
+for more than a few seconds.
+[`tests/analytics.test.ts`](tests/analytics.test.ts) pins all of this.
+
 ### Adding it to an MCP client — stdio (Claude Desktop example)
 
 Add this to `claude_desktop_config.json` (macOS:
@@ -326,11 +373,21 @@ rather than restating it, and separately asserts that *every* spawn site in the
 repo passes an explicit `env`, since the realistic way this returns is a new
 call site added by someone who has not read the comment.
 
+[`tests/analytics.test.ts`](tests/analytics.test.ts) covers the analytics
+facade (`src/analytics.ts`) with no network and no real key. With no
+`POSTHOG_KEY`, `capture` resolves, makes no request and writes nothing to the
+console (a `fetch` spy and console spies are installed for the assertion). With
+a key and a `fetch` that rejects, as in a PostHog outage, it still resolves
+after exactly one attempt. What goes over the wire is decoded and checked for
+`app`, `$process_person_profile: false`, a fresh id per event and the absence of
+the question, the excerpt and the cited path, and the two payload builders are
+asserted key by key, so a new property is a deliberate, README-visible change.
+
 [`tests/readme-test-claims.test.ts`](tests/readme-test-claims.test.ts) derives
 the two numbers in the sentence below from the real suite, so this README cannot
 keep claiming a test count it no longer has.
 
-The suite is **42 tests across 9 files**.
+The suite is **49 tests across 10 files**.
 
 Every push to `main` and every pull request runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`,
