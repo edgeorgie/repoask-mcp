@@ -10,6 +10,7 @@ import { indexRepo } from "./indexer.js";
 import { retrieve } from "./retrieval.js";
 import { saveIndex, loadIndex, keyOf, listIndexed } from "./store.js";
 import { synthesize, deterministicAnswer } from "./llm.js";
+import { checkQuestionLength } from "./rate-limit.js";
 
 export interface IndexRepoResult {
   owner: string;
@@ -61,6 +62,15 @@ export async function doAskRepo(
   question: string,
   topK?: number,
 ): Promise<AskRepoResult> {
+  // Enforced here, in the shared engine, rather than only in api/ask-repo.ts
+  // so EVERY caller is covered — the REST route, the MCP tool handler
+  // (src/create-server.ts) and the stdio server all funnel through this one
+  // function. An unbounded question is an unbounded input-token bill, since
+  // it is concatenated verbatim into the prompt. See src/rate-limit.ts.
+  const lengthCheck = checkQuestionLength(question);
+  if (!lengthCheck.ok) {
+    throw new Error(lengthCheck.error);
+  }
   const key = keyOf(owner, repo);
   let index = await loadIndex(key);
   if (!index) {
