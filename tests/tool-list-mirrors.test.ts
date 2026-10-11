@@ -4,11 +4,12 @@
  * THE DRIFT THIS EXISTS TO PREVENT
  *
  * `createRepoaskServer()` in src/create-server.ts is the ONE place a tool is
- * registered. Nine other places restate that set — and in four cases its COUNT
- * — in prose for humans and in doc comments for the next contributor, and not
- * one of them is updated by the compiler when a tool is added or renamed:
+ * registered. ELEVEN other places restate that set — and in four cases its
+ * COUNT — in prose for humans, in doc comments for the next contributor, and
+ * in executable scripts, and not one of them is updated by the compiler when a
+ * tool is added or renamed:
  *
- *   1. src/create-server.ts's own module header
+ *   1. src/create-server.ts's module header
  *   2. src/http-server.ts's module header ("the exact same tools ... —  X, Y, Z")
  *   3. api/mcp.ts's module header ("the identical tool set (X, Y, Z)")
  *   4. README §"How this differs from repoask"
@@ -18,6 +19,15 @@
  *   7. README §"Analytics events" — the `mcp_tool_called` row
  *   8. README §"Tests" — "`list_tools` returns exactly X, Y, Z"
  *   9. README §"Remote deployment status" — the example-session claim
+ *  10. examples/run-session.ts — calls each tool by hardcoded string
+ *  11. examples/run-http-session.ts — likewise
+ *
+ * 10 and 11 were MISSED by the first revision of this file, which enumerated
+ * nine and said so in its own PR. They are the worst two to miss: both are
+ * executable, `callTool`'s name is a plain string that `tsc` cannot check, and
+ * neither runs in CI (real network) — so they rot silently, and they are the
+ * generators of the transcripts this repo presents as evidence of real agent
+ * usage.
  *
  * This repo has already killed this exact class twice in its sibling
  * (`ask-edgeorgie-mcp`'s `CORPUS_FILES` versus three mirrors, one of them a
@@ -42,7 +52,7 @@
  * set is the SDK's own answer — `registerTool` calls, conditionals and all —
  * rather than a second literal this file would then have to keep in sync.
  * A guard that hardcoded ["ask_repo", "index_repo", "list_indexed_repos"]
- * would be a tenth mirror pretending to be a test.
+ * would be a twelfth mirror pretending to be a test.
  *
  * Comparisons are bidirectional set EQUALITY over names detected by SHAPE, not
  * by matching the known tool names — see `claimedTools` for why that
@@ -302,6 +312,45 @@ test("the derived tool set is non-empty and unique", async () => {
     expectedCount,
     `duplicate tool names from createRepoaskServer(): [${expectedNames.join(", ")}]`,
   );
+});
+
+test("the runnable example scripts call exactly the registered tool set", async () => {
+  // THE GAP THIS CLOSES, found by a cold re-read of the PR that added this file.
+  //
+  // That PR enumerated nine mirrors and missed two — these scripts — which is
+  // the same incompleteness the guard exists to prevent, one level up. They
+  // matter more than a doc mirror, for two reasons:
+  //
+  //   1. They are EXECUTABLE. Each calls `callTool({ name: "..." })` with a
+  //      hardcoded literal, so a renamed tool makes them fail at runtime, not
+  //      at compile time — `callTool`'s name is a plain string and `tsc` has
+  //      nothing to check it against.
+  //   2. They run OUTSIDE CI (real network, real GitHub), so nothing else in
+  //      this repo executes them. They would rot silently.
+  //
+  // And they are the generators of `examples/transcript.json` and
+  // `examples/http-transcript.json`, which the README presents as this repo's
+  // evidence of real agent usage. A broken generator means the next transcript
+  // regeneration fails or, worse, quietly records a shorter session.
+  //
+  // Asserted as EQUALITY, so a script that stops exercising a tool fails too:
+  // a transcript covering two of three tools is weaker evidence than it looks.
+  for (const script of ["run-session.ts", "run-http-session.ts"]) {
+    const source = await read("examples", script);
+    const called = [
+      ...new Set([...source.matchAll(/name:\s*"([a-z][a-z0-9_]*)"/g)].map((m) => m[1])),
+    ]
+      .filter((name) => !NON_TOOL_IDENTIFIERS.has(name))
+      .sort();
+
+    assert.deepEqual(
+      called,
+      expectedNames,
+      `examples/${script} calls [${called.join(", ")}] but the server registers ` +
+        `[${expectedNames.join(", ")}] — this script is executable and runs outside CI, so a ` +
+        `mismatch is a runtime failure in the generator of the repo's own evidence transcripts`,
+    );
+  }
 });
 
 test("every registered tool declares a schema and a real description", async () => {
