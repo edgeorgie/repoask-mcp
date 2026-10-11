@@ -142,9 +142,8 @@ async function read(...parts: string[]): Promise<string> {
  * claimed tool, and fails every mirror assertion at once with a message
  * blaming the docs for a drift that is really in this allowlist.
  */
-const ANALYTICS_EVENT_NAMES = await analyticsEventNames();
 const NON_TOOL_IDENTIFIERS = new Set([
-  ...ANALYTICS_EVENT_NAMES,
+  ...(await analyticsEventNames()),
   // The MCP protocol method, not a tool this server registers.
   "list_tools",
 ]);
@@ -157,40 +156,71 @@ const NON_TOOL_IDENTIFIERS = new Set([
  * derive it, and it is the same technique every assertion in this file already
  * uses on the prose mirrors.
  *
- * Two failure modes are handled explicitly, both found by mutation:
+ * Parsing TS with a regex is the risk here, and a cold review broke the first
+ * version four ways. Each is now closed and each is covered by a mutation
+ * test below:
  *
- *   1. A RENAMED or missing declaration throws, loudly, naming the file and
- *      the expected text — rather than falling back to an empty set, which
- *      would turn every analytics event name in the prose into a phantom tool
- *      and fail every mirror assertion with a message blaming the docs.
- *   2. A declaration whose trailing `;` is absent (valid TS) must not let the
- *      capture run on into the NEXT declaration. A naive `=([^;]+);` does
- *      exactly that: reformatting this union across several lines made it
- *      swallow `export type Surface` and quietly adopt `"web" | "mcp"` as
- *      non-tool vocabulary. The capture therefore stops at the first `;` or
- *      the next top-level `export`, whichever comes first, and the result is
- *      asserted to contain no `export` keyword.
+ *   1. A RENAMED or missing declaration must not degrade to an empty set — an
+ *      empty allowlist turns every event name in the prose into a phantom
+ *      tool and fails every mirror at once, blaming the docs. It throws.
+ *   2. A declaration with no trailing `;` is valid TS, and a lazy capture runs
+ *      straight into whatever follows. Stopping at the next `export` was not
+ *      enough: a non-exported `type`/`const`/`function` after it still got
+ *      swallowed, silently widening the allowlist with unrelated string
+ *      literals. The capture now ends at the first `;` or the first line that
+ *      starts a new top-level declaration, whichever comes first.
+ *   3. COMMENTS inside the declaration could donate their quoted strings to
+ *      the allowlist — a `// e.g. "purge_index"` was enough to mask a real
+ *      over-advertisement. Comments are stripped before literals are read.
+ *   4. A member that is not a string literal (a referenced type alias) would
+ *      yield a non-empty but WRONG set, which is worse than empty because it
+ *      looks healthy. Every member must now be a quoted literal; anything
+ *      else fails naming the offending text.
  */
 async function analyticsEventNames(): Promise<string[]> {
   const source = await read("src", "analytics.ts");
-  const declaration = /export type AnalyticsEvent\s*=([\s\S]*?)(?:;|(?=\bexport\b))/.exec(source);
-  if (!declaration) {
+
+  const header = /export type AnalyticsEvent\s*=/.exec(source);
+  if (!header) {
     throw new Error(
       "could not locate `export type AnalyticsEvent = ...` in src/analytics.ts — " +
         "this guard's non-tool allowlist derives from it and must not fall back to an empty set",
     );
   }
-  const body = declaration[1];
-  assert.ok(
-    !body.includes("export"),
-    `AnalyticsEvent's declaration capture ran past its own end into the next declaration: ` +
-      `${JSON.stringify(body)} — it would adopt an unrelated union's members as non-tool vocabulary`,
-  );
-  const names = [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+
+  // End the declaration at the first `;`, or at the first line that begins a
+  // new top-level declaration. `export` alone was insufficient: a plain
+  // `type`/`const`/`function`/`interface` at column 0 follows a `;`-less union
+  // just as legally, and swallowing it adopts an unrelated union's members.
+  const rest = source.slice(header.index + header[0].length);
+  const terminator = /;|^(?:export|type|const|let|var|function|interface|class|enum|declare|async)\b/m.exec(rest);
+  const body = terminator ? rest.slice(0, terminator.index) : rest;
+
+  // Comments first: a quoted string in a comment inside the declaration would
+  // otherwise be read as a member, widening the allowlist enough to mask a
+  // real over-advertised tool name in the prose.
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+  const names = [...code.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.ok(
     names.length > 0,
     `AnalyticsEvent's declaration yielded no string-literal members: ${JSON.stringify(body)}`,
   );
+
+  // Every member must be a quoted literal. A referenced type alias would
+  // leave `names` non-empty but WRONG — a healthy-looking subset, which is
+  // the exact misdirection this whole file exists to prevent.
+  const residue = code
+    .replace(/"[^"]*"/g, " ")
+    .replace(/[|\s]/g, "")
+    .trim();
+  assert.equal(
+    residue,
+    "",
+    `AnalyticsEvent has non-string-literal member(s) (${JSON.stringify(residue)}); this guard ` +
+      `derives its non-tool allowlist from string literals only and would silently use a wrong subset`,
+  );
+
   return names;
 }
 
