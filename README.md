@@ -308,8 +308,29 @@ ambient environment happens to be: it deletes `ANTHROPIC_API_KEY` /
 returns `null`, and it spawns the real stdio server with both keys stripped
 from the child process environment and asserts
 `answerMode === "deterministic"` strictly (plus no `model` field, the
-`No LLM key configured` preamble, and real citations). All four files
-together are 20 tests.
+`No LLM key configured` preamble, and real citations).
+
+[`tests/stdio-env-passthrough.test.ts`](tests/stdio-env-passthrough.test.ts)
+guards a defect that was invisible to every other signal in this repo. The MCP
+SDK's `StdioClientTransport` does **not** give the spawned server the parent
+process's environment: with `env` omitted it forwards only the SDK's own
+allow-list — `HOME, LOGNAME, PATH, SHELL, TERM, USER` on POSIX — which excludes
+`GITHUB_TOKEN`. CI passed a token to the test step believing it raised GitHub's
+limit from 60 requests/hour/IP to 1000, but the process that actually calls
+`api.github.com` is the server child, which never received it. The suite stayed
+pinned to the unauthenticated limit and failed with this product's own
+"GitHub rate limit reached" message on a shared runner IP — a test-harness bug
+wearing a product bug's clothes, and one that reads as GitHub's flakiness rather
+than as this repo's defect. The guard derives the SDK's allow-list at runtime
+rather than restating it, and separately asserts that *every* spawn site in the
+repo passes an explicit `env`, since the realistic way this returns is a new
+call site added by someone who has not read the comment.
+
+[`tests/readme-test-claims.test.ts`](tests/readme-test-claims.test.ts) derives
+the two numbers in the sentence below from the real suite, so this README cannot
+keep claiming a test count it no longer has.
+
+The suite is **42 tests across 9 files**.
 
 Every push to `main` and every pull request runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`,
@@ -398,12 +419,14 @@ each repo; they weren't forced into the shared package.
   path/line/score). Full transcript committed at
   [`examples/http-transcript.json`](examples/http-transcript.json) — its
   `serverUrl` field is `https://repoask-mcp.vercel.app/mcp`.
-- `npm test` (stdio, 20/20 tests across
+- `npm test` (stdio, the full suite across
   [`tests/server.test.ts`](tests/server.test.ts),
   [`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts),
   [`tests/rate-limit.test.ts`](tests/rate-limit.test.ts) and
   [`tests/zero-key-fallback.test.ts`](tests/zero-key-fallback.test.ts))
   still passes unmodified — the stdio transport was not touched, only added to.
+  (Exact counts are stated once, under "Verification" above, and derived from
+  the real suite by a test; they are deliberately not repeated here.)
 
 ### Cost and abuse posture of the public endpoints
 

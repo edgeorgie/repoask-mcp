@@ -11,6 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { serverEnv } from "./helpers/server-env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = path.join(__dirname, "..", "dist", "server.js");
@@ -19,6 +20,11 @@ async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
   const transport = new StdioClientTransport({
     command: "node",
     args: [SERVER_PATH],
+    // Required, not cosmetic: without an explicit `env` the SDK forwards only
+    // its own allow-list (no GITHUB_TOKEN), so these tests would hit GitHub
+    // unauthenticated at 60 req/hour/IP even in a CI job that passes a token.
+    // See tests/helpers/server-env.ts.
+    env: serverEnv(),
   });
   const client = new Client({ name: "repoask-mcp-test-client", version: "1.0.0" });
   await client.connect(transport);
