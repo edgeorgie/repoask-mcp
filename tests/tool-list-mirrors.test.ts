@@ -176,17 +176,36 @@ const NON_TOOL_IDENTIFIERS = new Set([
  *      yield a non-empty but WRONG set, which is worse than empty because it
  *      looks healthy. Every member must now be a quoted literal; anything
  *      else fails naming the offending text.
+ *   5. A SECOND text matching the declaration — a module-header comment
+ *      quoting an older version of it — hijacked the derivation, since
+ *      `.exec` takes the first match and said nothing about a second.
+ *      Asserted to be exactly one.
+ *   6. Single-quoted members were read as non-literals and killed the whole
+ *      suite with an untrue message. Both quote styles are accepted, and the
+ *      member count is cross-checked against the union's own `|` arity.
  */
 async function analyticsEventNames(): Promise<string[]> {
   const source = await read("src", "analytics.ts");
 
-  const header = /export type AnalyticsEvent\s*=/.exec(source);
-  if (!header) {
+  // `matchAll`, not `exec`: `.exec` takes the FIRST match and says nothing
+  // about a second. A historical note in a module header that quotes an older
+  // version of this declaration hijacks the derivation, and the resulting
+  // failure points at the docs rather than at the comment that caused it.
+  const headers = [...source.matchAll(/export type AnalyticsEvent\s*=/g)];
+  if (headers.length === 0) {
     throw new Error(
       "could not locate `export type AnalyticsEvent = ...` in src/analytics.ts — " +
         "this guard's non-tool allowlist derives from it and must not fall back to an empty set",
     );
   }
+  assert.equal(
+    headers.length,
+    1,
+    `src/analytics.ts contains ${headers.length} texts matching \`export type AnalyticsEvent =\` ` +
+      `(likely one in a comment quoting an older version); this guard would derive its allowlist ` +
+      `from whichever comes first and report the mismatch as a docs problem`,
+  );
+  const header = headers[0];
 
   // End the declaration at the first `;`, or at the first line that begins a
   // new top-level declaration. `export` alone was insufficient: a plain
@@ -201,7 +220,13 @@ async function analyticsEventNames(): Promise<string[]> {
   // real over-advertised tool name in the prose.
   const code = body.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
-  const names = [...code.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  // Both quote styles. This repo's formatter emits double quotes, so a
+  // single-quoted member is unlikely — but it would otherwise land in the
+  // residue check below and kill the whole suite with a message about
+  // "non-string-literal members" on a declaration that is perfectly valid.
+  // Loud and wrong is still wrong.
+  const LITERAL = /"([^"]*)"|'([^']*)'/g;
+  const names = [...code.matchAll(LITERAL)].map((m) => m[1] ?? m[2]);
   assert.ok(
     names.length > 0,
     `AnalyticsEvent's declaration yielded no string-literal members: ${JSON.stringify(body)}`,
@@ -211,7 +236,7 @@ async function analyticsEventNames(): Promise<string[]> {
   // leave `names` non-empty but WRONG — a healthy-looking subset, which is
   // the exact misdirection this whole file exists to prevent.
   const residue = code
-    .replace(/"[^"]*"/g, " ")
+    .replace(LITERAL, " ")
     .replace(/[|\s]/g, "")
     .trim();
   assert.equal(
@@ -219,6 +244,17 @@ async function analyticsEventNames(): Promise<string[]> {
     "",
     `AnalyticsEvent has non-string-literal member(s) (${JSON.stringify(residue)}); this guard ` +
       `derives its non-tool allowlist from string literals only and would silently use a wrong subset`,
+  );
+
+  // Cross-check the parse against the union's own arity: a body with N
+  // top-level `|` separators has at most N+1 members. A member count that
+  // disagrees means the capture stopped early or ran long, which the residue
+  // check cannot see when the extra text happens to be quoted.
+  const separators = code.split("|").length - 1;
+  assert.ok(
+    names.length <= separators + 1,
+    `AnalyticsEvent parsed to ${names.length} member(s) (${JSON.stringify(names)}) but its body has ` +
+      `only ${separators} top-level separator(s) — the capture ran past the declaration`,
   );
 
   return names;
