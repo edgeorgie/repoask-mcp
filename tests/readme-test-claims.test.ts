@@ -5,11 +5,19 @@
  *
  * The README said "All four files together are 20 tests" and, separately,
  * "npm test (stdio, 20/20 tests across …)". By the time anyone noticed, the
- * real suite was 39 tests across 8 files. Nothing could have caught it: a
+ * real suite was 34 tests across 7 files. Nothing could have caught it: a
  * prose count is invisible to the compiler, to CI, and to every other test in
  * the repo — the one class of mirror drift this repo had already killed twice
  * in code (the `CORPUS_FILES` mirror, the hand-maintained tool arrays) while
  * leaving the prose copy of the same mistake live.
+ *
+ * (That "34 across 7" is itself a stated count in prose, and the first
+ * revision of this comment got it wrong — it said 39 across 8, which a cold
+ * review measured against the pre-change tree and refuted. A file whose
+ * thesis is that unguarded prose counts go stale had a stale prose count in
+ * its own header. Historical figures cannot be derived, so the only defence
+ * is to state them once, measured, and keep them out of the live claims the
+ * assertions below actually check.)
  *
  * It matters more here than a typo would: the README is this repo's evidence
  * surface. A reader checking the claim runs `npm test`, sees a different

@@ -109,16 +109,25 @@ test("serverEnv({ without }) withholds exactly the named variables and nothing e
   }
 });
 
-test("every StdioClientTransport spawn site passes an explicit env", async () => {
+test("every StdioClientTransport spawn site forwards a real environment", async () => {
   // Scans source text rather than behaviour on purpose: the reintroduction
   // path is a NEW spawn site added by someone who has not read this file, and
   // no behavioural test can cover a call site that does not exist yet.
+  //
+  // Asserts the VALUE, not the presence of the key. An earlier revision of
+  // this guard matched /\benv\s*:/ alone, which a cold review broke in one
+  // line: `env: {}` satisfies that pattern while being byte-identical in
+  // effect to omitting `env` entirely, because the SDK merges
+  // `{...getDefaultEnvironment(), ...env}` — an empty object contributes
+  // nothing. The guard's green state and the defect's green state were
+  // indistinguishable, which is the exact failure mode it was written to end.
   let sitesChecked = 0;
 
   for (const relative of SPAWN_SITE_FILES) {
     const source = await fs.readFile(path.join(ROOT, relative), "utf8");
     const marker = "new StdioClientTransport(";
     let from = 0;
+    let sitesInThisFile = 0;
 
     for (;;) {
       const start = source.indexOf(marker, from);
@@ -142,20 +151,44 @@ test("every StdioClientTransport spawn site passes an explicit env", async () =>
 
       const call = source.slice(start, end + 1);
       sitesChecked++;
-      assert.match(
-        call,
-        /\benv\s*:/,
-        `${relative} spawns a stdio server without an explicit \`env\`. The SDK then ` +
-          `forwards only its own allow-list, which excludes GITHUB_TOKEN, so the server ` +
-          `child calls api.github.com unauthenticated (60 req/hour/IP) no matter what the ` +
-          `parent process holds. Pass \`env: serverEnv()\` — see tests/helpers/server-env.ts. ` +
-          `Offending call:\n${call}`,
+      sitesInThisFile++;
+
+      // Accepted forms: `env: serverEnv(...)` directly, or `env: <local>`
+      // where that local is itself assigned from serverEnv(). Anything else —
+      // a literal object, a spread, an unrelated variable — fails, because
+      // this guard cannot verify that it forwards anything.
+      const envValue = /\benv\s*:\s*([A-Za-z_$][\w$]*)\s*(?:\(|,|\})/.exec(call);
+      const named = envValue?.[1];
+      const forwardsRealEnv =
+        named === "serverEnv" ||
+        (named !== undefined &&
+          new RegExp(`\\b(?:const|let|var)\\s+${named}\\s*(?::[^=]+)?=\\s*serverEnv\\(`).test(
+            source,
+          ));
+
+      assert.ok(
+        forwardsRealEnv,
+        `${relative} spawns a stdio server without forwarding a real environment. The SDK ` +
+          `merges {...getDefaultEnvironment(), ...env}, so an omitted \`env\` — or an empty ` +
+          `or unrelated one — gives the child only HOME/LOGNAME/PATH/SHELL/TERM/USER, which ` +
+          `excludes GITHUB_TOKEN. The server child then calls api.github.com unauthenticated ` +
+          `(60 req/hour/IP) no matter what the parent process holds. Pass \`env: serverEnv()\` ` +
+          `— see tests/helpers/server-env.ts. Offending call:\n${call}`,
       );
     }
+
+    // Per-file, not a cross-file sum. A summed backstop is satisfiable by
+    // other files' call sites, so a file whose spawn stopped being detectable
+    // (aliased constructor, factory indirection) would slip through while the
+    // total still looked healthy.
+    assert.ok(
+      sitesInThisFile > 0,
+      `${relative} is listed as a spawn site but no \`${marker}\` call was found in it. ` +
+        `Either the spawn moved (update SPAWN_SITE_FILES) or it is now constructed ` +
+        `indirectly, which this scan cannot see — make it a direct call.`,
+    );
   }
 
-  // Guards against the silent-skip failure mode this repo has already shipped
-  // twice: a scan that matches nothing passes for the wrong reason.
   assert.ok(
     sitesChecked >= SPAWN_SITE_FILES.length,
     `expected at least one spawn site per listed file, found ${sitesChecked} across ` +
@@ -167,7 +200,22 @@ test("the spawn-site file list covers every file in the repo that spawns a serve
   // The list above is itself a hand-maintained mirror, so derive the real set
   // and assert the mirror equals it — otherwise a new spawning file simply
   // goes unchecked and the guard above still passes.
-  const roots = ["tests", "examples", "src", "api"];
+  //
+  // Walks from the repo ROOT with an EXCLUSION list rather than an inclusion
+  // list of directories. An earlier revision walked only ["tests",
+  // "examples", "src", "api"], which a cold review broke by adding a real
+  // spawn site under scripts/ — invisible to both guards, 42/42 green. An
+  // inclusion list is the same fail-silent shape as the SDK allow-list this
+  // whole file exists because of: every directory someone forgets to add is a
+  // silent skip. Exclusion fails the other way, which is the correct way.
+  const SKIP_DIRS = new Set([
+    "node_modules",
+    "dist",
+    ".git",
+    ".github",
+    ".vercel",
+    "coverage",
+  ]);
   // This guard file contains the literal marker in its own scanning logic and
   // error messages while never spawning anything, so it would match itself.
   // Excluded by exact path rather than by a looser pattern, so a genuine spawn
@@ -183,19 +231,20 @@ test("the spawn-site file list covers every file in the repo that spawns a serve
       return; // directory is optional
     }
     for (const entry of entries) {
-      const relative = path.join(dir, entry.name);
+      const relative = dir === "." ? entry.name : path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
         await walk(relative);
         continue;
       }
-      if (!/\.(ts|mts|mjs|js)$/.test(entry.name)) continue;
+      if (!/\.(ts|mts|cts|mjs|cjs|js)$/.test(entry.name)) continue;
       if (relative === SELF) continue;
       const source = await fs.readFile(path.join(ROOT, relative), "utf8");
       if (source.includes("new StdioClientTransport(")) found.push(relative);
     }
   }
 
-  for (const root of roots) await walk(root);
+  await walk(".");
 
   assert.deepEqual(
     found.sort(),
