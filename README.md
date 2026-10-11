@@ -289,6 +289,16 @@ real stdio MCP calls to the compiled server. It asserts:
   (`octocat/git-consortium`) still returns real citations — proving the
   auto-index-on-first-ask path works.
 
+[`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts)
+covers the prompt-spotlighting defense on the LLM synthesis path (delimiter
+wrapping, forged-delimiter sanitization). Both files together are 7 tests.
+
+Every push to `main` and every pull request runs
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`,
+`npx tsc --noEmit`, `npm run build`, `npm test`. CI gets **no secrets and no
+`.env`** on purpose — the suite has to pass on a bare checkout, which is also
+the proof that `ask_repo`'s zero-key deterministic fallback really works.
+
 ## Design notes / what's reused from repoask vs. what's new
 
 | Concern | repoask (browser) | repoask-mcp (this repo) |
@@ -325,8 +335,11 @@ each repo; they weren't forced into the shared package.
   `POST https://repoask-mcp.vercel.app/api/ask-repo` are the REST routes the
   UI calls — verified live with `curl`, e.g.
   `curl -s -X POST https://repoask-mcp.vercel.app/api/ask-repo -H 'content-type: application/json' -d '{"owner":"octocat","repo":"git-consortium","question":"What is this repository about?"}'`
-  returns a real `answerMode: "deterministic"` response with 4 citations
-  (`product-backlog.md`, `README.md` with exact line ranges).
+  returns a real `answerMode: "llm"` response (`model: "claude-haiku-4-5"`,
+  since an `ANTHROPIC_API_KEY` is now configured on the deployment) with 4
+  citations (`product-backlog.md`, `README.md` with exact line ranges).
+  Unset the key on the deployment and the same request returns
+  `answerMode: "deterministic"` with the same citations and no prose answer.
 - `GET https://repoask-mcp.vercel.app/mcp` → `200` MCP health check JSON:
   `{"name":"repoask-mcp","transport":"streamable-http","mcpEndpoint":"/mcp","status":"ok"}`
 - `POST https://repoask-mcp.vercel.app/mcp` is the real Streamable HTTP MCP
@@ -342,8 +355,10 @@ each repo; they weren't forced into the shared package.
   path/line/score). Full transcript committed at
   [`examples/http-transcript.json`](examples/http-transcript.json) — its
   `serverUrl` field is `https://repoask-mcp.vercel.app/mcp`.
-- `npm test` (stdio, 3/3) still passes unmodified — the stdio transport was
-  not touched, only added to.
+- `npm test` (stdio, 7/7 tests across
+  [`tests/server.test.ts`](tests/server.test.ts) and
+  [`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts))
+  still passes unmodified — the stdio transport was not touched, only added to.
 
 ### Root cause of the two prior deploy failures, and the fix
 
