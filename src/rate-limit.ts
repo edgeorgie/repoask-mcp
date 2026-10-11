@@ -22,28 +22,36 @@
  *   1. Per-caller sliding window — keyed by client IP (best-effort; see
  *      getClientId below). Generous enough for normal MCP client usage
  *      (tools/list + a couple of real questions) but caps any single caller.
- *   2. Global hard ceiling — a cap on TOTAL requests/minute across every
- *      caller, independent of the per-IP key. This is the "cost ceiling
- *      regardless of auth" backstop: IP-based limiting can be defeated by
- *      spoofing X-Forwarded-For or rotating source IPs, but the global
- *      ceiling still bounds worst-case request volume (and therefore
- *      worst-case LLM spend) hitting this process no matter how callers are
- *      identified.
+ *   2. Process-wide ceiling — a cap on TOTAL requests/minute across every
+ *      caller within THIS instance, independent of the per-IP key. It bounds
+ *      worst-case request volume (and therefore worst-case LLM spend) hitting
+ *      a single process no matter how callers identify themselves. It is NOT
+ *      a deployment-wide ceiling; see the measured limitation below.
  *
- * IMPLEMENTATION NOTE / KNOWN LIMITATION: this is a plain in-memory sliding
- * window (a Map of timestamps), which is the right level of effort for a
- * low-traffic portfolio demo, but it does NOT survive serverless reality on
- * Vercel:
- *   - Each cold start gets a fresh, empty Map, resetting all counters.
- *   - Concurrent requests landing on different warm instances each see their
- *     own independent Map, so the "global" ceiling is actually per-instance,
- *     not truly global across the deployment.
- * It therefore raises the cost of abuse substantially without being a hard
- * spend cap. The real hard ceiling belongs at the billing layer (an Anthropic
- * spend limit on the key). Before this endpoint is put under real load,
- * replace this with a distributed store shared across instances — e.g.
- * Upstash Redis or Vercel KV with INCR + TTL / a sliding-window Lua script —
- * so limits hold across cold starts and horizontal scaling.
+ * MEASURED LIMITATION — READ BEFORE CITING THESE LIMITS AS PROTECTION. This
+ * is a plain in-memory sliding window (a Map of timestamps), which is the
+ * right level of effort for a low-traffic portfolio demo, but it does NOT
+ * survive serverless reality on Vercel:
+ *   - CONCURRENCY DEFEATS BOTH WINDOWS ENTIRELY, and this was measured, not
+ *     theorised: 150 simultaneous POSTs from one IP, no header manipulation,
+ *     returned 200 x150 with zero 429s. Vercel allocates instances in
+ *     response to parallelism and each starts with an empty Map, so parallel
+ *     requests are each counted against a different fresh bucket. The limits
+ *     bind only a SEQUENTIAL caller (14 in a loop -> 10x200 then 4x429).
+ *   - Each cold start also gets a fresh, empty Map, resetting all counters —
+ *     but note cold starts are the lesser issue; plain parallelism is enough
+ *     and needs no timing games.
+ *   - Do NOT claim this ceiling survives a caller spoofing or rotating
+ *     X-Forwarded-For. That claim was previously made here and in the README
+ *     and it was false: forged X-Forwarded-For values were measured still
+ *     getting 429, because Vercel's edge sets that header and the platform
+ *     value is what this code observes. Spoofing was never the live bypass.
+ * It therefore raises the cost of a naive abuse loop without being a hard
+ * spend cap, and must not be described as one. The real hard ceiling belongs
+ * at the billing layer (an Anthropic spend limit on the key). To actually
+ * close the concurrency hole, replace this with a distributed store shared
+ * across instances — e.g. Upstash Redis or Vercel KV with INCR + TTL / a
+ * sliding-window Lua script — so limits hold across instances and cold starts.
  */
 
 interface CallerState {

@@ -62,17 +62,24 @@ test("the window resets once enough time has elapsed", () => {
   assert.equal(afterWindow.allowed, true, "request after the window has fully elapsed should be allowed again");
 });
 
-test("the global ceiling trips even across many distinct caller IDs", () => {
+test("the process-wide ceiling trips even across many distinct caller IDs", () => {
   _resetForTests();
   const now = Date.now();
   let lastResult;
   for (let i = 0; i < RATE_LIMIT_CONFIG.GLOBAL_MAX_REQUESTS + 5; i++) {
     // Every request uses a unique caller ID, so the per-caller limit never trips —
-    // only the global ceiling can block these.
+    // only the process-wide ceiling can block these.
     lastResult = checkRateLimit(`caller-${i}`, now + i);
   }
   assert.equal(lastResult!.allowed, false);
   assert.equal(lastResult!.reason, "global");
+  // SCOPE OF THIS TEST, stated so it is not over-read: it proves the ceiling
+  // works WITHIN one process. It cannot and does not prove a deployment-wide
+  // limit — in production, 150 concurrent requests were measured getting 200
+  // with zero 429s, because each serverless instance holds its own counters.
+  // See the MEASURED LIMITATION block in src/rate-limit.ts. Closing that hole
+  // needs cross-instance state and would need an integration test, not this
+  // single-process unit test.
 });
 
 test("getClientId prefers x-forwarded-for, then x-real-ip, then the socket", () => {
