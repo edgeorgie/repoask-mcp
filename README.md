@@ -384,21 +384,23 @@ the question, the excerpt and the cited path, and the two payload builders are
 asserted key by key, so a new property is a deliberate, README-visible change.
 
 [`tests/tool-list-mirrors.test.ts`](tests/tool-list-mirrors.test.ts) guards the
-nine places that restate this server's tool set — three module headers and six
-README passages, including the machine-readable contract above. The expected
-set is derived by connecting a real MCP client to the real
+eleven places that restate this server's tool set — three module headers, six
+README passages (including the machine-readable contract above), and the two
+runnable scripts in `examples/`, which call each tool by hardcoded string and
+are the generators of the transcripts this repo offers as evidence. The
+expected set is derived by connecting a real MCP client to the real
 `createRepoaskServer()` factory and reading `tools/list`, never from a literal,
-so the test cannot itself become a tenth mirror. It is mutation-validated in
+so the test cannot itself become a twelfth mirror. It is mutation-validated in
 both directions: registering a fourth tool, renaming one, dropping a contract
 heading, going stale in a header, advertising a tool that was never registered,
-and misstating the count each turn it red, while reflowing a correct comment to
-a different width does not.
+misstating the count, and an example script dropping or renaming a call each
+turn it red, while reflowing a correct comment to a different width does not.
 
 [`tests/readme-test-claims.test.ts`](tests/readme-test-claims.test.ts) derives
 the two numbers in the sentence below from the real suite, so this README cannot
 keep claiming a test count it no longer has.
 
-The suite is **61 tests across 11 files**.
+The suite is **62 tests across 11 files**.
 
 Every push to `main` and every pull request runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`,
