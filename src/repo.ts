@@ -62,6 +62,15 @@ export function selectFiles(tree: { path: string; type: string; size?: number }[
     .slice(0, MAX_FILES);
 }
 
+/**
+ * Headers for GitHub requests. GITHUB_TOKEN is optional: when absent the
+ * Authorization header is simply omitted, so a fresh clone works with zero
+ * configuration (subject to the unauthenticated 60 req/hr/IP limit). When
+ * present — e.g. `secrets.GITHUB_TOKEN` in CI, which Actions mints
+ * automatically and is not a configured secret — the limit rises to
+ * 1000 req/hr, which is what keeps the network-dependent test suite from
+ * flaking on shared CI egress.
+ */
 function ghHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "User-Agent": "repoask-mcp" };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -89,9 +98,18 @@ export async function fetchRepoFiles(
 }
 
 export async function fetchFileText(ref: RepoRef, branch: string, path: string): Promise<string> {
+  // Send the same headers as the API calls. raw.githubusercontent.com has its
+  // own rate limit, separate from api.github.com's, and indexing fetches one
+  // blob PER FILE (up to MAX_FILES), so this is the higher-volume of the two
+  // call sites — it was previously the only unauthenticated one, which left
+  // the dominant flake source in place even with GITHUB_TOKEN configured.
   const res = await fetch(
     `https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${encodeURIComponent(branch)}/${path}`,
+    { headers: ghHeaders() },
   );
+  if (res.status === 403 || res.status === 429) {
+    throw new Error(`GitHub rate limit reached while downloading ${path}. Try again in a few minutes, or set GITHUB_TOKEN.`);
+  }
   if (!res.ok) throw new Error(`Could not download ${path} (${res.status}).`);
   return res.text();
 }

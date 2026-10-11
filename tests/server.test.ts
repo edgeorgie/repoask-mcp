@@ -46,7 +46,11 @@ test("index_repo + ask_repo against a real small public repo returns real citati
       name: "index_repo",
       arguments: { owner: "octocat", repo: "Spoon-Knife" },
     });
-    assert.equal(indexResult.isError, undefined);
+    assert.equal(
+      indexResult.isError,
+      undefined,
+      `index_repo failed: ${JSON.stringify(indexResult.content)}`,
+    );
     const indexed = indexResult.structuredContent as { fileCount: number; chunkCount: number; branch: string };
     assert.ok(indexed.fileCount >= 1, "expected at least 1 file indexed");
     assert.ok(indexed.chunkCount >= 1, "expected at least 1 chunk");
@@ -56,7 +60,7 @@ test("index_repo + ask_repo against a real small public repo returns real citati
       name: "ask_repo",
       arguments: { owner: "octocat", repo: "Spoon-Knife", question: "What does this repository say?" },
     });
-    assert.equal(askResult.isError, undefined);
+    assert.equal(askResult.isError, undefined, `ask_repo failed: ${JSON.stringify(askResult.content)}`);
     const structured = askResult.structuredContent as {
       answer: string;
       answerMode: "llm" | "deterministic";
@@ -81,7 +85,7 @@ test("ask_repo auto-indexes a never-before-seen repo on first call", async () =>
       name: "ask_repo",
       arguments: { owner: "octocat", repo: "git-consortium", question: "What is this project for?" },
     });
-    assert.equal(result.isError, undefined);
+    assert.equal(result.isError, undefined, `ask_repo auto-index failed: ${JSON.stringify(result.content)}`);
     const structured = result.structuredContent as { citations: unknown[] };
     assert.ok(structured.citations.length >= 1);
   });
