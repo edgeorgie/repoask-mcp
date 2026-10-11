@@ -1,0 +1,79 @@
+name: Live smoke
+
+# Guards the README's "verified live" claims so they fail loudly instead of
+# rotting silently — the previous round of README corrections existed only
+# because those claims had gone stale with nothing watching them.
+#
+# DELIBERATELY A SEPARATE WORKFLOW FROM ci.yml, not an extra step in it:
+# this job depends on a third-party deployment being up, so it can go red for
+# reasons that have nothing to do with the commit under review. Making it part
+# of the PR-gating `verify` job would create exactly the flaky required check
+# that teaches reviewers to ignore red. Here it runs on a schedule (and on
+# demand), reports independently, and blocks nothing.
+#
+# IT ONLY CALLS THE FREE GET ENDPOINTS. `POST /api/ask-repo` is LLM-backed and
+# billed to the repo owner's Anthropic account (see the README's cost/abuse
+# posture section), so smoke-testing it on a timer would mean paying for a
+# health check forever, and an hourly schedule would also eat into the
+# endpoint's own rate-limit budget. The GET health checks are free, require no
+# key, and are enough to catch the failure mode that actually happened before:
+# the deployment serving errors or the wrong content type.
+
+on:
+  schedule:
+    # 06:00 UTC daily. Frequent enough that a dead deployment is caught within
+    # a day, infrequent enough to be free and to not look like traffic.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      # Cache-busted so a CDN-cached response can't make a dead origin look
+      # healthy.
+      - name: GET /mcp returns the MCP health JSON
+        run: |
+          set -euo pipefail
+          url="https://repoask-mcp.vercel.app/mcp?cb=${GITHUB_RUN_ID}"
+          body="$(curl -fsS --max-time 30 -H 'cache-control: no-cache' "$url")"
+          echo "body: $body"
+          echo "$body" | grep -q '"status":"ok"'
+          echo "$body" | grep -q '"name":"repoask-mcp"'
+          echo "$body" | grep -q '"transport":"streamable-http"'
+
+      - name: GET / serves the human web UI as HTML
+        run: |
+          set -euo pipefail
+          url="https://repoask-mcp.vercel.app/?cb=${GITHUB_RUN_ID}"
+          ct="$(curl -fsS --max-time 30 -o /tmp/root.html -w '%{content_type}' \
+                 -H 'cache-control: no-cache' "$url")"
+          echo "content-type: $ct"
+          case "$ct" in text/html*) ;; *) echo "expected text/html, got $ct"; exit 1 ;; esac
+          grep -qi '<!doctype html' /tmp/root.html
+
+      # Asserts the protection from the cost/abuse posture section is actually
+      # live, using a preflight (OPTIONS) rather than a billable POST: a
+      # disallowed Origin must NOT be echoed back into
+      # Access-Control-Allow-Origin, and must not come back as a wildcard.
+      - name: CORS is scoped, not wildcard
+        run: |
+          set -euo pipefail
+          url="https://repoask-mcp.vercel.app/api/ask-repo?cb=${GITHUB_RUN_ID}"
+          hdrs="$(curl -fsS --max-time 30 -X OPTIONS -D - -o /dev/null \
+                    -H 'Origin: https://evil.example.com' \
+                    -H 'Access-Control-Request-Method: POST' "$url")"
+          echo "$hdrs"
+          allow="$(printf '%s' "$hdrs" \
+                   | tr -d '\r' \
+                   | grep -i '^access-control-allow-origin:' \
+                   | cut -d' ' -f2- || true)"
+          echo "allow-origin: '${allow:-<absent>}'"
+          if [ "$allow" = "*" ] || [ "$allow" = "https://evil.example.com" ]; then
+            echo "FAIL: a disallowed origin was permitted"
+            exit 1
+          fi

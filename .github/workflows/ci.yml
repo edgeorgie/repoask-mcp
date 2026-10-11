@@ -29,14 +29,40 @@ jobs:
       - name: Build
         run: npm run build
 
-      # No secrets are provided to this job on purpose. `ask_repo` is
-      # designed to work with no LLM key (deterministic citation-only
-      # fallback), and `index_repo` works against GitHub unauthenticated, so
-      # the whole suite must pass on a bare checkout with zero config. If a
-      # test ever needs a key to pass, that is the bug — not this workflow.
+      # Fails the job on a high/critical advisory instead of letting `npm ci`
+      # print "N vulnerabilities" and sail past it with exit 0 — which it does,
+      # so a green check previously said nothing about the dependency tree.
+      # Placed after Build so a genuine compile break is still reported as its
+      # own red step rather than being masked by an audit failure.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      # No LLM key and no `.env` are provided to this job on purpose:
+      # `ask_repo`'s zero-key deterministic fallback has to hold on a bare
+      # checkout, and tests/zero-key-fallback.test.ts pins that explicitly —
+      # it strips ANTHROPIC_API_KEY/OPENAI_API_KEY from the server process it
+      # spawns rather than trusting the ambient environment, so it genuinely
+      # tests the fallback instead of merely observing whichever path CI
+      # happens to take.
+      #
+      # GITHUB_TOKEN *is* passed, and that does not contradict the above. The
+      # suite makes real, unmocked calls to api.github.com (src/repo.ts)
+      # against public repos like octocat/Spoon-Knife. Unauthenticated that is
+      # 60 requests/hour/IP, shared across GitHub Actions' egress — i.e. a
+      # required check that can go red for reasons unrelated to the change,
+      # which trains reviewers to hit re-run instead of reading the failure.
+      # That is a liability, not a design virtue, and the previous version of
+      # this comment framed it as the latter. `secrets.GITHUB_TOKEN` is minted
+      # automatically per run by Actions and is not a secret anyone has to
+      # configure, so passing it preserves the "clone and `npm test` with zero
+      # setup" property while raising the limit to 1000 requests/hour.
+      # src/repo.ts's ghHeaders() already reads GITHUB_TOKEN and omits the
+      # Authorization header when it is absent, so local runs are unchanged.
       #
       # `npm test` runs `pretest` (npm run build) itself; the explicit Build
       # step above is kept so a compile failure is reported as its own red
       # step rather than buried in the test step's output.
       - name: Test
         run: npm test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

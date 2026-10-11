@@ -291,13 +291,46 @@ real stdio MCP calls to the compiled server. It asserts:
 
 [`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts)
 covers the prompt-spotlighting defense on the LLM synthesis path (delimiter
-wrapping, forged-delimiter sanitization). Both files together are 7 tests.
+wrapping, forged-delimiter sanitization).
+
+[`tests/rate-limit.test.ts`](tests/rate-limit.test.ts) covers the rate
+limiter and the question-length cap as pure logic (no network): requests
+under the per-caller limit are allowed, the request that crosses it gets
+`allowed: false` with a positive `retryAfterSeconds`, one caller's usage
+doesn't consume another's bucket, the sliding window reopens after it
+elapses, the global ceiling still trips across many distinct caller IDs, and
+an over-length question is rejected with a message naming the cap.
+
+[`tests/zero-key-fallback.test.ts`](tests/zero-key-fallback.test.ts) pins the
+zero-key deterministic path *explicitly* rather than relying on whatever the
+ambient environment happens to be: it deletes `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` for the duration of the assertion and asserts `synthesize`
+returns `null`, and it spawns the real stdio server with both keys stripped
+from the child process environment and asserts
+`answerMode === "deterministic"` strictly (plus no `model` field, the
+`No LLM key configured` preamble, and real citations). All four files
+together are 20 tests.
 
 Every push to `main` and every pull request runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`,
-`npx tsc --noEmit`, `npm run build`, `npm test`. CI gets **no secrets and no
-`.env`** on purpose — the suite has to pass on a bare checkout, which is also
-the proof that `ask_repo`'s zero-key deterministic fallback really works.
+`npx tsc --noEmit`, `npm run build`, `npm audit --audit-level=high`,
+`npm test`.
+
+CI is given **no LLM key and no `.env`** on purpose, so the suite has to pass
+on a bare checkout. That alone would not *prove* the zero-key fallback works
+— a test that accepts either `answerMode` passes whichever path runs, which
+is what this suite used to do. The proof is
+`tests/zero-key-fallback.test.ts`, which forces the no-key path itself and
+asserts strict equality on `"deterministic"`, so it would fail if the
+fallback broke even on a machine where a key *is* configured.
+
+CI does receive `secrets.GITHUB_TOKEN`. That is not a configured secret —
+Actions mints it automatically per run — and it is passed because the suite
+makes real calls to `api.github.com`, which is 60 requests/hour/IP
+unauthenticated on shared Actions egress and therefore a genuine flake
+source for a required check. `src/repo.ts`'s `ghHeaders()` simply omits the
+`Authorization` header when `GITHUB_TOKEN` is absent, so a local `npm test`
+on a fresh clone still needs zero setup.
 
 ## Design notes / what's reused from repoask vs. what's new
 
@@ -338,8 +371,18 @@ each repo; they weren't forced into the shared package.
   returns a real `answerMode: "llm"` response (`model: "claude-haiku-4-5"`,
   since an `ANTHROPIC_API_KEY` is now configured on the deployment) with 4
   citations (`product-backlog.md`, `README.md` with exact line ranges).
-  Unset the key on the deployment and the same request returns
-  `answerMode: "deterministic"` with the same citations and no prose answer.
+  By design (`src/engine.ts` `doAskRepo` → `src/llm.ts` `synthesize`), if no
+  LLM key is configured `synthesize` returns `null` and the same request
+  takes the deterministic citation-only path instead, reporting
+  `answerMode: "deterministic"` with no `model` field. That is a description
+  of the code path, not a live observation — verifying it against *this*
+  deployment would mean unsetting its env var, which nobody has done. What
+  *is* verified is the behaviour itself, locally and in CI, by
+  [`tests/zero-key-fallback.test.ts`](tests/zero-key-fallback.test.ts),
+  which spawns the real server with both keys stripped and asserts
+  `answerMode === "deterministic"`. The citation set is **not** claimed to be
+  identical across the two paths — retrieval runs first and is shared, but
+  nothing pins the top-`k` set to be invariant, and that was never checked.
 - `GET https://repoask-mcp.vercel.app/mcp` → `200` MCP health check JSON:
   `{"name":"repoask-mcp","transport":"streamable-http","mcpEndpoint":"/mcp","status":"ok"}`
 - `POST https://repoask-mcp.vercel.app/mcp` is the real Streamable HTTP MCP
@@ -355,10 +398,52 @@ each repo; they weren't forced into the shared package.
   path/line/score). Full transcript committed at
   [`examples/http-transcript.json`](examples/http-transcript.json) — its
   `serverUrl` field is `https://repoask-mcp.vercel.app/mcp`.
-- `npm test` (stdio, 7/7 tests across
-  [`tests/server.test.ts`](tests/server.test.ts) and
-  [`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts))
+- `npm test` (stdio, 20/20 tests across
+  [`tests/server.test.ts`](tests/server.test.ts),
+  [`tests/llm-prompt-injection.test.ts`](tests/llm-prompt-injection.test.ts),
+  [`tests/rate-limit.test.ts`](tests/rate-limit.test.ts) and
+  [`tests/zero-key-fallback.test.ts`](tests/zero-key-fallback.test.ts))
   still passes unmodified — the stdio transport was not touched, only added to.
+
+### Cost and abuse posture of the public endpoints
+
+Stated plainly, because an `ANTHROPIC_API_KEY` is configured on this
+deployment and the exact working `curl` is published above: every anonymous
+call to `/api/ask-repo` (and every `ask_repo` tool call over `/mcp`) can
+spend the repo owner's own Anthropic credit. `owner`/`repo` are
+caller-chosen, so a caller influences how much retrieved repository content
+goes into each prompt — i.e. the per-call cost, not just the call count.
+
+What is in place:
+
+- **Rate limiting** ([`src/rate-limit.ts`](src/rate-limit.ts)) on every route
+  that can reach `doAskRepo` or the indexer — `/api/ask-repo`,
+  `/api/index-repo`, `/api/mcp` and the standalone Express `/mcp`. Two
+  independent sliding windows: 10 requests/minute per caller IP, and a 60
+  requests/minute global ceiling that still applies when a caller rotates or
+  spoofs `X-Forwarded-For`. Over-limit requests get `429` with a
+  `Retry-After` header. Ported from the sibling
+  [ask-edgeorgie-mcp](https://github.com/edgeorgie/ask-edgeorgie-mcp)'s
+  `src/rate-limit.ts` so the two servers behave identically.
+- **A question-length cap** (2000 characters), enforced in the shared engine
+  so the REST routes, the MCP tool handler and the stdio server are all
+  covered by one check.
+- **Scoped CORS.** `Access-Control-Allow-Origin` was `*`; it is now limited
+  to this deployment's own origin plus `localhost`. The first-party UI uses a
+  same-origin fetch, and CORS is browser-enforced, so this costs documented
+  `curl`/agent/MCP usage nothing while stopping third-party pages from
+  driving a billable endpoint via their visitors' browsers.
+
+Known limits, so this is not read as more than it is: the limiter is
+in-memory, and Vercel gives each cold start a fresh counter and can run
+several warm instances concurrently, so the "global" ceiling is really
+per-instance. It raises the cost of abuse substantially; it is not a hard
+spend cap. A hard cap belongs at the billing layer (an Anthropic spend limit
+on the key), and a distributed store (Upstash Redis / Vercel KV with
+`INCR` + TTL) is the documented upgrade path in `src/rate-limit.ts`. There is
+still no authentication on these endpoints — being openly callable by any
+agent is the point of the artifact — so rate limiting plus a billing cap,
+rather than auth, is the containment strategy.
 
 ### Root cause of the two prior deploy failures, and the fix
 
