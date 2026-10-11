@@ -15,7 +15,24 @@ import { promises as fs } from "node:fs";
 // only its own small allow-list to the child unless `env` is given, so without
 // this the captured transcript would be a recording of an UNAUTHENTICATED
 // server (60 GitHub req/hour/IP) regardless of the operator's own environment.
+//
+// The LLM keys are withheld on purpose, and that is not tidiness. The
+// committed transcript documents the DETERMINISTIC citation-only path, and
+// src/llm.ts reads ANTHROPIC_API_KEY / OPENAI_API_KEY from this child process.
+// Forwarding them makes the committed evidence depend on who regenerated it:
+// with a valid key the transcript silently records `answerMode: "llm"`,
+// contradicting its own surrounding prose, and with an INVALID one it records
+// the provider's error text — observed verbatim in review, including a live
+// Anthropic `request_id`, written into a public file. An evidence artifact has
+// to be reproducible by any reader, so the one variable that changes its
+// meaning is the one variable not forwarded.
 import { serverEnv } from "../tests/helpers/server-env.js";
+
+/**
+ * Keys withheld from the server child so this harness records the
+ * deterministic path the committed transcript documents, on any machine.
+ */
+const WITHHOLD_FROM_TRANSCRIPT = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"] as const;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -33,7 +50,7 @@ async function main() {
   const transport = new StdioClientTransport({
     command: "node",
     args: [SERVER_PATH],
-    env: serverEnv(),
+    env: serverEnv({ without: WITHHOLD_FROM_TRANSCRIPT }),
   });
   const client = new Client({ name: "repoask-mcp-example-session", version: "1.0.0" });
   await client.connect(transport);

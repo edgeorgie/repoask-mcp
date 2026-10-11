@@ -1,0 +1,10 @@
+{
+  "//": "Typecheck config for everything the build does NOT compile. tsconfig.json's include is src/**/*.ts, because that is what `npm run build` emits to dist/. An unintended consequence: `tsc --noEmit` — CI's Typecheck step — covered NONE of tests/ or examples/. A real type error planted in tests/helpers/server-env.ts left both `tsc --noEmit` and `npm run build` at exit 0, and tsx strips types without checking, so the suite passed too. That matters beyond hygiene here: examples/run-session.ts generates this repo's committed evidence transcripts and tests/ holds the derived guards the README's claims rest on. Kept separate rather than widening tsconfig.json's include, which would pull tests/ and examples/ into the published dist/ output.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "examples/**/*.ts"]
+}

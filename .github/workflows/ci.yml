@@ -26,6 +26,17 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # tsconfig.json's `include` is src/**/*.ts, because that is what the
+      # build emits. So the step above covers NONE of tests/ or examples/ — a
+      # real type error planted in tests/helpers/server-env.ts was measured to
+      # leave both `tsc --noEmit` and `npm run build` at exit 0, while tsx
+      # strips types without checking, so the suite ran and passed too. Those
+      # are the files generating this repo's committed evidence transcripts
+      # and holding the derived guards the README's claims rest on, i.e. the
+      # worst place for a silent type error. Same planted error: exit 2 here.
+      - name: Typecheck tests and examples
+        run: npx tsc -p tsconfig.check.json
+
       - name: Build
         run: npm run build
 
