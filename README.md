@@ -420,9 +420,10 @@ What is in place:
   that can reach `doAskRepo` or the indexer — `/api/ask-repo`,
   `/api/index-repo`, `/api/mcp` and the standalone Express `/mcp`. Two
   independent sliding windows: 10 requests/minute per caller IP, and a 60
-  requests/minute global ceiling that still applies when a caller rotates or
-  spoofs `X-Forwarded-For`. Over-limit requests get `429` with a
-  `Retry-After` header. Ported from the sibling
+  requests/minute per-instance ceiling. Over-limit requests get `429` with a
+  `Retry-After` header. **Read the measured limits below before treating
+  either number as a guarantee — neither holds under concurrency.** Ported
+  from the sibling
   [ask-edgeorgie-mcp](https://github.com/edgeorgie/ask-edgeorgie-mcp)'s
   `src/rate-limit.ts` so the two servers behave identically.
 - **A question-length cap** (2000 characters), enforced in the shared engine
@@ -434,16 +435,33 @@ What is in place:
   `curl`/agent/MCP usage nothing while stopping third-party pages from
   driving a billable endpoint via their visitors' browsers.
 
-Known limits, so this is not read as more than it is: the limiter is
-in-memory, and Vercel gives each cold start a fresh counter and can run
-several warm instances concurrently, so the "global" ceiling is really
-per-instance. It raises the cost of abuse substantially; it is not a hard
-spend cap. A hard cap belongs at the billing layer (an Anthropic spend limit
-on the key), and a distributed store (Upstash Redis / Vercel KV with
-`INCR` + TTL) is the documented upgrade path in `src/rate-limit.ts`. There is
-still no authentication on these endpoints — being openly callable by any
-agent is the point of the artifact — so rate limiting plus a billing cap,
-rather than auth, is the containment strategy.
+Measured limits, so this is not read as more than it is. The limiter is
+in-memory, so its counters live in a single serverless instance's heap:
+
+- **Concurrency defeats both windows, and this was measured, not theorised.**
+  150 simultaneous POSTs from a single IP, with no header manipulation, all
+  returned `200` — zero `429`s. Vercel allocates instances in response to
+  parallelism, and each new instance starts with an empty counter `Map`, so
+  parallel requests are each counted against a different, fresh bucket. The
+  limits only bind a *sequential* caller: 14 requests in a loop correctly
+  yields 10×`200` then 4×`429`.
+- **An earlier version of this section blamed cold starts, and that was the
+  wrong threat.** No timing games are needed; plain parallelism is enough.
+- **An earlier version also claimed the ceiling survives a caller rotating or
+  spoofing `X-Forwarded-For`. That claim was false and has been removed.**
+  Forged `X-Forwarded-For` values were measured getting `429` anyway, because
+  Vercel's edge sets that header and the platform value is the one observed
+  here. Spoofing was never the live bypass; concurrency is.
+
+So the "global" ceiling is really per-instance, and the per-caller window is
+per-instance too. This raises the cost of a naive abuse loop; it is **not** a
+spend cap and should not be cited as one. Closing the concurrency hole needs
+cross-instance state — Upstash Redis / Vercel KV with `INCR` + TTL, the
+upgrade path documented in `src/rate-limit.ts`. A genuine hard cap belongs at
+the billing layer (an Anthropic spend limit on the key), which is account
+configuration, not code. There is still no authentication on these endpoints
+— being openly callable by any agent is the point of the artifact — so rate
+limiting plus a billing cap, rather than auth, is the containment strategy.
 
 ### Root cause of the two prior deploy failures, and the fix
 
